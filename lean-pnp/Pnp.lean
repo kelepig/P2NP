@@ -141,3 +141,6 @@ import Pnp.Problem
 import Pnp.Machine.BranchIndex
 import Pnp.Machine.DigitShape
 import Pnp.Machine.PadConflict
+import Pnp.Machine.ExpandInitTwo
+import Pnp.Machine.AlignChainTwo
+import Pnp.Machine.BranchMachineTwo

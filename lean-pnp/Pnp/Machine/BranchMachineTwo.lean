@@ -1,0 +1,475 @@
+/-
+  文件：Pnp/Machine/BranchMachineTwo.lean
+  File: Pnp/Machine/BranchMachineTwo.lean
+
+  主题：**左右副垫解耦**的逐分支判定机——左垫固定 `T+1`、右垫 `m` 可放大，
+        区域为 `Reg.initReg st w (T+1) m`。
+  Topic: per-branch machine with decoupled pads (left fixed at `T+1`, right pad `m`).
+
+  缘由（#265 缺陷修复）：原机器层定理的右预留前提 `hpad` 在「左右垫同取 `m`」时
+  强迫 `|输入| = Ω(T²)`，与 `T = |w|^k + k` 冲突 ⇒ 空真。解耦后 `hpad` 只需
+  `3m ≥ 预算 + 6(T+1)(T+1) ≈ poly(T)`，取 `m ≈ 预算/3` 即可。
+  Reason: the old right-pad premise was unsatisfiable in the target regime; decoupling
+  reduces it to a polynomial bound on `m`.
+-/
+
+import Pnp.Machine.BranchMachine
+import Pnp.Machine.AlignChainTwo
+
+namespace Pnp
+
+namespace DTM
+
+/-- **逐分支判定机（左右副垫解耦）**：左垫 `padStr (Pl-1)` 留在初始纸带上下文，右垫 `padStr T`
+    由装配段写出；整机接受 ⇔ 观察机在理想纸带 `Reg.enc (Reg.initReg st w Pl (T+1)) L` 上接受。
+    Per-branch machine with decoupled pads. -/
+theorem branchMachine_accept_iff_two {q : Nat} (st : Fin q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    (Pl T b K : Nat) (hPl : 1 ≤ Pl) (L R : List Sym) (M : NTM q)
+    (hb : K + 1 ≤ (Reg.enc (Reg.initReg st w Pl (T + 1)) L).right.length) :
+    ((seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+        (obsPhase q b ((M.stutter).haltNorm))).run
+      (expandCost (a :: l') + 1
+        + ((padStr T).length + 1 + (3 * (T + 1) + 3 * l'.length + 1 + 1 + 1)) + 1 + K)
+      ⟨(seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).start,
+        Tape.mk (padStr (Pl - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+          ++ (List.replicate (padStr T).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept
+      ↔ ((obsPhase q b ((M.stutter).haltNorm)).run K
+          ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+            Reg.enc (Reg.initReg st w Pl (T + 1)) L⟩).state
+        = (obsPhase q b ((M.stutter).haltNorm)).accept := by
+  -- 装配段的运行与不停机
+  have hA := alignChain_to_initReg_two st w a l' hw hl Pl T hPl L R
+  have hnh := alignChain_halted_false (padStr T) (3 * (T + 1) + 3 * l'.length + 1)
+    (a :: l') hl (padStr (Pl - 1) ++ L) R
+  -- 装配段终点纸带（实际纸带）：理想区域编码 + 右尾 `none :: R`
+  have hne : (Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+      ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R)).right ≠ [] := by
+    simp
+  -- 相位吸收：整机 = 观察机在实际纸带上跑 `K` 步（右段停机即冻结，无需不停机前提）
+  have hrun := seqComp_run_absorb
+    (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+    (obsPhase q b ((M.stutter).haltNorm))
+    (expandCost (a :: l') + 1
+      + ((padStr T).length + 1 + (3 * (T + 1) + 3 * l'.length + 1 + 1 + 1)))
+    K
+    ⟨(alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1)).start,
+      Tape.mk (padStr (Pl - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+        ++ (List.replicate (padStr T).length none ++ R))⟩
+    (Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+      ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R))
+    hA hne hnh
+  -- 右尾绝缘：实际纸带与理想纸带的判定相同（预算覆盖版）
+  have hver := obsPhase_verdict_of_padRight_budget q b ((M.stutter).haltNorm) K
+    ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+      Reg.enc (Reg.initReg st w Pl (T + 1)) L⟩
+    (Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+      ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R))
+    (enc_padRight_append (Reg.initReg st w Pl (T + 1)) L R) hb
+  -- 把整机的终点状态换成「观察机实际纸带的终点状态」（`natAdd` 形态）
+  have hgoal : ((seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+        (obsPhase q b ((M.stutter).haltNorm))).run
+      (expandCost (a :: l') + 1
+        + ((padStr T).length + 1 + (3 * (T + 1) + 3 * l'.length + 1 + 1 + 1)) + 1 + K)
+      ⟨(seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).start,
+        Tape.mk (padStr (Pl - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+          ++ (List.replicate (padStr T).length none ++ R))⟩).state
+      = Fin.natAdd (128 + ((padStr T).length + 1
+            + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+          ((obsPhase q b ((M.stutter).haltNorm)).run K
+            ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+              Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+                ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R)⟩).state := by
+    rw [show (⟨(seqComp (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr (Pl - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+            ++ (List.replicate (padStr T).length none ++ R))⟩
+        : Config ((128 + ((padStr T).length + 1
+              + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+            + (stateCountO q b + 1)))
+      = ⟨Fin.castAdd (stateCountO q b + 1)
+          (alignChain (padStr T) (3 * (T + 1) + 3 * l'.length + 1)).start,
+          Tape.mk (padStr (Pl - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+            ++ (List.replicate (padStr T).length none ++ R))⟩ from rfl]
+    exact congrArg Config.state hrun
+  rw [hgoal]
+  -- 状态：组合机的接受态也是 `natAdd` 形态，判定归结为观察机自己的接受态
+  constructor
+  · intro h
+    -- 组合机接受态 = `natAdd` 形态
+    have h2 : Fin.natAdd (128 + ((padStr T).length + 1
+          + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+        ((obsPhase q b ((M.stutter).haltNorm)).run K
+          ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+            Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+              ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R)⟩).state
+        = Fin.natAdd (128 + ((padStr T).length + 1
+            + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+          (obsPhase q b ((M.stutter).haltNorm)).accept := h
+    exact hver.mpr (Fin.ext (Nat.add_left_cancel (congrArg Fin.val h2)))
+  · intro h
+    have h2 : Fin.natAdd (128 + ((padStr T).length + 1
+          + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+        ((obsPhase q b ((M.stutter).haltNorm)).run K
+          ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+            Tape.mk ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).left)
+              ((Reg.enc (Reg.initReg st w Pl (T + 1)) L).right ++ none :: R)⟩).state
+        = Fin.natAdd (128 + ((padStr T).length + 1
+            + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)))
+          (obsPhase q b ((M.stutter).haltNorm)).accept := by
+      exact Fin.ext (congrArg (fun v => 128 + ((padStr T).length + 1
+            + ((3 * (T + 1) + 3 * l'.length + 1) + 1 + 2)) + v)
+        (congrArg Fin.val (hver.mp h)))
+    exact h2
+
+
+/-- **解耦版（右垫 `m` 参数化）**：左垫固定 `T+1`、右垫 `m`，区域为
+    `Reg.initReg st w (T+1) m`。E 的逐分支循环体直接用这一形态。
+    Decoupled form with right pad `m` and left pad fixed at `T+1`. -/
+theorem branchMachine_accept_iff_two_pad {q : Nat} (st : Fin q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    (T m b K : Nat) (hT : 0 < T) (hm : 1 ≤ m) (L R : List Sym) (M : NTM q)
+    (hb : K + 1 ≤ (Reg.enc (Reg.initReg st w (T + 1) m) L).right.length) :
+    ((seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+        (obsPhase q b ((M.stutter).haltNorm))).run
+      (expandCost (a :: l') + 1
+        + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1 + K)
+      ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).start,
+        Tape.mk (padStr T ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+          ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept
+      ↔ ((obsPhase q b ((M.stutter).haltNorm)).run K
+          ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+            Reg.enc (Reg.initReg st w (T + 1) m) L⟩).state
+        = (obsPhase q b ((M.stutter).haltNorm)).accept := by
+  have h1 : (T + 1) - 1 = T := by omega
+  have h2 : m - 1 + 1 = m := Nat.sub_add_cancel hm
+  have hb' : K + 1 ≤ (Reg.enc (Reg.initReg st w (T + 1) ((m - 1) + 1)) L).right.length := by
+    rw [h2]; exact hb
+  have h := branchMachine_accept_iff_two st w a l' hw hl (T + 1) (m - 1) b K
+    (by omega) L R M hb'
+  rw [h1, h2] at h
+  exact h
+
+/-- **逐分支判定机（完备性，副垫 `m` 参数化）**：原机在 `T` 步内接受 ⇒ 存在分支 `(t, i)`，
+    使「装配 + 观察」整机在装配步数 + 1 + 该分支固定预算内停在接受态。
+    预算 `roundCostStay x Z (i % B) x.cur + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b` 来自 #258。
+    Machine-level per-branch completeness: acceptance of `M` yields a branch whose assembled
+    machine accepts within the fixed per-branch budget of #258. -/
+theorem branchMachine_dummy_complete_two {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
+    (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z m : Nat) (hm : 1 ≤ m)
+    (hZT : Z ≤ T + 1) (R : List Sym)
+    (hd1 : T ≤ m)
+    (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
+    (hpad : roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w (T + 1) m).post.length + 1)
+    (hacc : M.AcceptsWithin w T) :
+    ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+                (Reg.initReg M.start w (T + 1) m).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b))
+        ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept := by
+  -- 初始区域的性质
+  have hxM : (Reg.initReg M.start w (T + 1) m).MarkersOK := Reg.initReg_markersOK M.start w (T + 1) m
+  have hxw : CfgEquiv (Reg.initReg M.start w (T + 1) m).toConfig (M.init w) :=
+    Reg.initReg_cfgEquiv M w (T + 1) m
+  have hd1' : T ≤ (Reg.initReg M.start w (T + 1) m).pre.length := by
+    rw [Reg.initReg_pre_length]; omega
+  have hd2' : T ≤ (Reg.initReg M.start w (T + 1) m).post.length := by
+    rw [Reg.initReg_post_length]; omega
+  -- 完备性（#258）
+  obtain ⟨t, i, ht1, htT, hi, hhit⟩ :=
+    exists_branch_dummy_hit_uniform M hB hBpos w T b hbnd hT Z (Reg.initReg M.start w (T + 1) m)
+      hxM hxw hd1' hd2' hxacc hxre rfl hZT hacc
+  refine ⟨t, i, ht1, htT, hi, ?_⟩
+  -- 命中 ⇒ 运行相位机在预算末态接受
+  have hK : ((obsPhase q b ((M.stutter).haltNorm)).run
+      (roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+      ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+        Reg.enc (Reg.initReg M.start w (T + 1) m)
+          (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))⟩).state
+      = (obsPhase q b ((M.stutter).haltNorm)).accept := by
+    rw [show (obsPhase q b ((M.stutter).haltNorm)).start
+          = embOb q b (simObs q b ((M.stutter).haltNorm)).start from rfl]
+    exact (obsPhase_accept_iff q b ((M.stutter).haltNorm)
+      (roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+      ⟨(simObs q b ((M.stutter).haltNorm)).start,
+        Reg.enc (Reg.initReg M.start w (T + 1) m)
+          (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))⟩).mpr hhit
+  -- 机器层判据
+  have hbK : roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+        (Reg.initReg M.start w (T + 1) m).cur + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ (Reg.enc (Reg.initReg M.start w (T + 1) m)
+          (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))).right.length := by
+    rw [Reg.enc_right_length]
+    -- `rc_i ≤ rc_B`，再与 `hpad` 串接
+    have hrc : roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+          (Reg.initReg M.start w (T + 1) m).cur
+        ≤ roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur :=
+      roundCostStay_mono _ _ _ _ _ _ (Nat.le_refl _) (Nat.le_of_lt (Nat.mod_lt i hBpos))
+    exact Nat.le_trans
+      (Nat.add_le_add_right (Nat.add_le_add_right hrc
+        (branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)) 1) hpad
+  exact (branchMachine_accept_iff_two_pad M.start w a l' hw hl T m b
+    (roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur
+      + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+    hT hm
+    (none :: List.replicate Z (some false) ++ digitArea (i % B :: branchBlocks B t i))
+    R M hbK).mpr hK
+
+
+set_option maxHeartbeats 2000000 in
+
+/-- **可靠性（解耦副垫）**：整机在该分支预算内接受 ⇒ 原机 `T` 步内接受。
+    Soundness with decoupled pads. -/
+theorem branchMachine_dummy_sound_two {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hBpos : 0 < B)
+    (hlB : ∀ m a', ((M.stutter).step m a').length ≤ B + 1)
+    (T b t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (_htT : t ≤ T) (hbnd : B + 2 < 2 ^ b)
+    (Z m : Nat) (hm : 1 ≤ m) (_hZT : Z ≤ T + 1) (R : List Sym)
+    (_hd1 : T ≤ m)
+    (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
+    (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
+    (hpadpost : (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w (T + 1) m).post.length)
+    (hpadpre : (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w (T + 1) m).pre.length)
+    (hlen : (branchBlocks B t i).length ≤ T)
+    (hpad : roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w (T + 1) m).post.length + 1)
+    (hAcc : ((seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+        (obsPhase q b ((M.stutter).haltNorm))).run
+      (expandCost (a :: l') + 1
+        + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+        + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+            + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b))
+      ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).start,
+        Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i)))
+          ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+            ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept) :
+    M.AcceptsWithin w T := by
+  have hxM : (Reg.initReg M.start w (T + 1) m).MarkersOK := Reg.initReg_markersOK M.start w (T + 1) m
+  have hxw : CfgEquiv (Reg.initReg M.start w (T + 1) m).toConfig (M.init w) :=
+    Reg.initReg_cfgEquiv M w (T + 1) m
+  -- 机器层 → 运行相位机（预算 `rc_B + branchBudget`）
+  have hbK : roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ (Reg.enc (Reg.initReg M.start w (T + 1) m)
+          (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))).right.length := by
+    rw [Reg.enc_right_length]; exact hpad
+  have hob := (branchMachine_accept_iff_two_pad M.start w a l' hw hl T m b
+    (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+      + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+    hT hm
+    (none :: List.replicate Z (some false) ++ digitArea (i % B :: branchBlocks B t i))
+    R M hbK).mp hAcc
+  -- 运行相位机 → 观察机命中（同一预算）
+  have hhit := (obsPhase_accept_iff q b ((M.stutter).haltNorm)
+    (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+      + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+    ⟨(simObs q b ((M.stutter).haltNorm)).start,
+      Reg.enc (Reg.initReg M.start w (T + 1) m)
+        (none :: List.replicate Z (some false)
+          ++ digitArea (i % B :: branchBlocks B t i))⟩).mp hob
+  -- 把预算拆成 `rc_i + K`，交给任意预算可靠性
+  have hrc : roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+      (Reg.initReg M.start w (T + 1) m).cur
+    ≤ roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur :=
+    roundCostStay_mono _ _ _ _ _ _ (Nat.le_refl _) (Nat.le_of_lt (Nat.mod_lt i hBpos))
+  refine acceptsWithin_of_dummy_branch_acc_budget q b B t i T M w hBpos hbnd hlB Z
+    (Reg.initReg M.start w (T + 1) m) hxM hxw hpadpost hpadpre hlen (by omega) hk1 hk2
+    rfl hxacc hxre
+    (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+      + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b
+      - roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur)
+    ?_ ?_
+  · -- `hK`：前缀通路步数落在 `总预算 - rc_i` 内
+    intro L1 hb1 r1 hle1 hp1
+    have h1 := passRun_steps_le_uniform q b ((M.stutter).haltNorm).step
+      (Z + i % B + 3) (i % B + 1) hk1
+      (Reg.initReg M.start w (T + 1) m) L1 hb1 r1 hp1 T hle1
+    have hmod : i % B < B := Nat.mod_lt i hBpos
+    have h2 : costCap (Reg.initReg M.start w (T + 1) m).pre.length (Z + (i % B + 3)) T (2 ^ b)
+        = costCap (Reg.initReg M.start w (T + 1) m).pre.length Z T (2 ^ b) + 2 * (i % B + 3) :=
+      costCap_Z_shift _ _ _ _ _
+    rw [show Z + i % B + 3 = Z + (i % B + 3) from by omega, h2] at h1
+    have hmul : T * (costCap (Reg.initReg M.start w (T + 1) m).pre.length Z T (2 ^ b)
+          + 2 * (i % B + 3))
+        ≤ T * costCap (Reg.initReg M.start w (T + 1) m).pre.length Z T (2 ^ b)
+          + 2 * (B + 3) * (T + 1) := by
+      rw [Nat.mul_add]
+      have hle : T * (2 * (i % B + 3)) ≤ 2 * (B + 3) * (T + 1) := by
+        rw [show T * (2 * (i % B + 3)) = 2 * (i % B + 3) * T from Nat.mul_comm _ _]
+        exact Nat.mul_le_mul (Nat.mul_le_mul_left 2 (by omega)) (by omega)
+      omega
+    have hBB : r1.steps + 6 ≤ branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b := by
+      unfold branchBudget
+      omega
+    -- `branchBudget ≤ 总预算 - rc_i`
+    have hle2 : branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b
+        ≤ roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+          + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b
+          - roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur := by
+      omega
+    exact Nat.le_trans hBB hle2
+  · -- 命中时刻：`run (rc_i + K) = run 总预算`
+    rw [show roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B) (Reg.initReg M.start w (T + 1) m).cur
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+            + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b
+            - roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+                (Reg.initReg M.start w (T + 1) m).cur)
+        = roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+          + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b from by omega]
+    exact hhit
+
+set_option maxHeartbeats 2000000 in
+
+/-- **单条等价（解耦副垫）**：存在分支使整机在统一预算内接受 ⇔ 原机 `T` 步内接受。
+    Single equivalence with decoupled pads — E's per-branch interface. -/
+theorem branchMachine_dummy_iff_two {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
+    (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z m : Nat) (hm : 1 ≤ m)
+    (hZT : Z ≤ T + 1) (R : List Sym) (hd1 : T ≤ m)
+    (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
+    (hpost : ∀ t i, 1 ≤ t → t ≤ T → (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w (T + 1) m).post.length)
+    (hpre : ∀ t i, 1 ≤ t → t ≤ T → (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w (T + 1) m).pre.length)
+    (hpad : roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w (T + 1) m).post.length + 1) :
+    (∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b))
+        ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept) ↔
+      M.AcceptsWithin w T := by
+  constructor
+  · -- 可靠性方向：整机接受 ⇒ 原机在 `T` 步内接受
+    rintro ⟨t, i, ht1, htT, _hiT, hacc⟩
+    have hmod : i % B < B := Nat.mod_lt i hBpos
+    refine branchMachine_dummy_sound_two M w a l' hw hl hBpos
+      (stutter_step_length_le M B hB) T b t i hT ht1 htT hbnd Z m hm hZT R hd1
+      (by omega) (by omega) hxacc hxre (hpost t i ht1 htT) (hpre t i ht1 htT) ?_ hpad hacc
+    rw [branchBlocks_length B t i (by omega)]
+    exact htT
+  · -- 完备性方向：原机接受 ⇒ 某分支在统一预算内接受（接受态冻结放宽预算）
+    intro hacc
+    obtain ⟨t, i, ht1, htT, hiT, haccm⟩ :=
+      branchMachine_dummy_complete_two M w a l' hw hl hB hBpos T b hbnd hT Z m hm hZT R hd1
+        hxacc hxre hpad hacc
+    refine ⟨t, i, ht1, htT, hiT, ?_⟩
+    have hmod : i % B < B := Nat.mod_lt i hBpos
+    have hrc : roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+          (Reg.initReg M.start w (T + 1) m).cur
+        ≤ roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur :=
+      roundCostStay_mono (Reg.initReg M.start w (T + 1) m) Z Z (i % B) B
+        (Reg.initReg M.start w (T + 1) m).cur (Nat.le_refl _) (Nat.le_of_lt hmod)
+    have hsplit : expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b)
+        = (expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+                (Reg.initReg M.start w (T + 1) m).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b))
+          + (roundCostStay (Reg.initReg M.start w (T + 1) m) Z B (Reg.initReg M.start w (T + 1) m).cur
+              - roundCostStay (Reg.initReg M.start w (T + 1) m) Z (i % B)
+                  (Reg.initReg M.start w (T + 1) m).cur) := by
+      omega
+    rw [hsplit]
+    exact DTM.run_add_state_of_accept _ _ _ _ haccm
+
+
+
+/-- **左预留前提（解耦版）自动成立**：左垫固定 `T+1`、`t ≤ T` 时分支块表放得下。
+    Left-pad premise holds automatically with the fixed left pad `T+1`. -/
+theorem branchMachine_pre_ok_two {q : Nat} (M : NTM q) (w : List Bool) {B : Nat}
+    (T m t i : Nat) (hT : 0 < T) (_ht1 : 1 ≤ t) (htT : t ≤ T) :
+    (branchBlocks B t i).length + 1 ≤ (Reg.initReg M.start w (T + 1) m).pre.length := by
+  rw [Reg.initReg_pre_length, branchBlocks_length B t i (by omega)]
+  omega
+
+/-- **右预留前提（解耦版）自动成立**：右侧格数至少 `m`，取 `m ≥ T+1` 即够。
+    Right-pad premise holds automatically once the right pad is at least `T+1`. -/
+theorem branchMachine_post_ok_two {q : Nat} (M : NTM q) (w : List Bool) {B : Nat}
+    (T m t i : Nat) (_hT : 0 < T) (ht1 : 1 ≤ t) (htT : t ≤ T) (hm : T + 1 ≤ m) :
+    (branchBlocks B t i).length + 1 ≤ (Reg.initReg M.start w (T + 1) m).post.length := by
+  rw [Reg.initReg_post_length, branchBlocks_length B t i (by omega)]
+  have h0 : 0 ≤ ((w.map some).drop 1).length := Nat.zero_le _
+  omega
+
+/-- **右长覆盖前提（解耦版）的满足条件**：只要 `m` 不小于「单轮成本 + 逐分支预算 + 1」，
+    `hpad` 就成立。#265 的空真性由此消除——`m` 只受预算（关于 `T` 的多项式）约束。
+    The decoupled right-pad premise holds as soon as `m` covers the budget — its size is
+    polynomial in `T`, so the defect of #265 is gone. -/
+theorem branchMachine_hpad_two {q : Nat} (M : NTM q) (w : List Bool) (Z T B b m : Nat)
+    (hm : roundCostStay (Reg.initReg M.start w (T + 1) 0) Z B
+            (Reg.initReg M.start w (T + 1) 0).cur
+          + branchBudget (T + 1) Z T B b + 1 ≤ m) :
+    roundCostStay (Reg.initReg M.start w (T + 1) m) Z B
+          (Reg.initReg M.start w (T + 1) m).cur
+        + branchBudget (Reg.initReg M.start w (T + 1) m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w (T + 1) m).post.length + 1 := by
+  -- `pre.length` 与 `cur` 都与右垫无关，故单轮成本与预算项逐字相同
+  have hpre : (Reg.initReg M.start w (T + 1) m).pre.length = T + 1 :=
+    Reg.initReg_pre_length M.start w (T + 1) m
+  -- 单轮成本只读 `pre` 与 `cur`，两者都与右垫无关
+  have hEq : roundCostStay (Reg.initReg M.start w (T + 1) m) Z B
+        (Reg.initReg M.start w (T + 1) m).cur
+      = roundCostStay (Reg.initReg M.start w (T + 1) 0) Z B
+        (Reg.initReg M.start w (T + 1) 0).cur := rfl
+  rw [hEq, hpre]
+  have hpost : (Reg.initReg M.start w (T + 1) m).post.length
+      = ((w.map some).drop 1).length + m :=
+    Reg.initReg_post_length M.start w (T + 1) m
+  rw [hpost]
+  omega
+
+end DTM
+
+end Pnp
