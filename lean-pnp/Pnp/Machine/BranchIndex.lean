@@ -138,6 +138,18 @@ theorem any_range_iff_exists (P : Nat → Bool) (n : Nat) :
   · rintro ⟨j, hj, hP⟩
     exact ⟨j, List.mem_range.mpr hj, hP⟩
 
+/-- **分支总数 `T·B^T` 的指数上界**：`B ≤ 2^b` ⇒ `T·B^T ≤ 2^(T + b·T)`。
+    E 的外层循环轮数是 `T·B^T`，本件是 `hHalt` 里「轮数因子」的算术外壳。
+    Exponential bound on the number of branches `T·B^T`. -/
+theorem branchCount_le_two_pow (B T b : Nat) (hB : B ≤ 2 ^ b) :
+    T * B ^ T ≤ 2 ^ (T + b * T) := by
+  have h1 : T ≤ 2 ^ T := self_le_two_pow T
+  have h2 : B ^ T ≤ 2 ^ (b * T) := by
+    have h : B ^ T ≤ (2 ^ b) ^ T := Nat.pow_le_pow_left hB T
+    rwa [← Nat.pow_mul] at h
+  have h3 : T * B ^ T ≤ 2 ^ T * 2 ^ (b * T) := Nat.mul_le_mul h1 h2
+  rwa [← Nat.pow_add] at h3
+
 end DTM
 
 end Pnp
