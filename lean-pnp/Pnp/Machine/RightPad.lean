@@ -110,6 +110,21 @@ theorem run_accept_eq_at_budget_of_padRight_enc (M : DTM q) (n K : Nat) (hn : n 
   refine run_accept_eq_of_halted_at M n K hn _ _ ?_ h1
   exact run_state_eq_of_padRight_enc M n st x L t hP h
 
+/-- **远端右尾追加不改变判定（冻结时刻版）**：在纸带右端追加任意尾巴，只要右侧预留覆盖到
+    冻结时刻 `n`（`n+1 ≤ 右长`）且第 `n` 步已停机，则任意预算 `K ≥ n` 下接受判定相同。
+    这是 E 装配时「实际纸带 = 理想纸带 + 右侧输入副本」的直接接口。
+    Appending a far-right tail does not change the verdict once the ideal run has halted by a
+    time covered by the right padding. -/
+theorem run_accept_eq_at_budget_of_right_append (M : DTM q) (n K : Nat) (hn : n ≤ K)
+    (c : Config q) (copy : List Sym) (hlen : n + 1 ≤ c.tape.right.length)
+    (h1 : M.halted (M.run n c) = true) :
+    ((M.run K c).state = M.accept ↔
+      (M.run K (Config.mk c.state ⟨c.tape.left, c.tape.right ++ copy⟩)).state
+        = M.accept) := by
+  refine run_accept_eq_of_halted_at M n K hn _ _ ?_ h1
+  exact run_state_eq_of_padRight M n c _ rfl (Tape.padRight_of_append c.tape copy)
+    (right_safe_of_len M n c (by omega))
+
 end DTM
 
 end Pnp
