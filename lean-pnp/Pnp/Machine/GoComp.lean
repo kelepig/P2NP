@@ -118,6 +118,79 @@ theorem goLeft2_halted_true_iff (a b : Nat) (c : Config ((a + 1) + (b + 1))) :
   rw [show (goLeft b).reject.val = b from rfl]
   simp
 
+/-- **`goLeft2` 右半段不停机**（`a+1 ≤ k < a+1+b`）：切换后进入右段，右段未走完时
+    状态值严格小于终止值 `a+1+b`，故由 `goLeft2_halted_true_iff` 不停机。
+    The right half of `goLeft2` never halts before its final state. -/
+theorem goLeft2_halted_false_right (a b : Nat) (t : Tape) (j : Nat) (hj : j < b)
+    (hr : t.right ≠ []) :
+    (goLeft2 a b).halted ((goLeft2 a b).run ((a + 1) + j) ⟨(goLeft2 a b).start, t⟩)
+      = false := by
+  have hne : (moveLeftN a t).right ≠ [] := moveLeftN_right_ne_of_pos a t hr
+  -- 左段不停机
+  have hnhA : ∀ i, i < a → (goLeft a).halted ((goLeft a).run i ⟨(goLeft a).start, t⟩) = false := by
+    intro i hi
+    rw [show (goLeft a).start = (⟨0, by omega⟩ : Fin (a + 1)) from rfl]
+    rw [goLeft_run_from a i 0 t (by omega) hr]
+    exact goLeft_halted_false a (0 + i) (by omega) (moveLeftN i t)
+  -- 左段 `a` 步的完整格局（状态 + 纸带）
+  have hrun_a : (goLeft2 a b).run a ⟨(goLeft2 a b).start, t⟩
+      = ⟨Fin.castAdd (b + 1) ((goLeft a).run a ⟨(goLeft a).start, t⟩).state,
+         ((goLeft a).run a ⟨(goLeft a).start, t⟩).tape⟩ := by
+    change (seqComp (goLeft a) (goLeft b)).run a _ = _
+    exact seqComp_embed_left (goLeft a) (goLeft b) a ⟨(goLeft a).start, t⟩ hnhA
+  -- 切换后的纸带仍是 `moveLeftN a t`（读到什么写回什么）
+  have hstep : (goLeft2 a b).run 1 ⟨Fin.castAdd (b + 1) ((goLeft a).run a ⟨(goLeft a).start, t⟩).state,
+        ((goLeft a).run a ⟨(goLeft a).start, t⟩).tape⟩
+      = ⟨Fin.natAdd (a + 1) (goLeft b).start, moveLeftN a t⟩ := by
+    change (seqComp (goLeft a) (goLeft b)).run 1 _ = _
+    rw [goLeft_run a t hr]
+    have hsw := seqComp_switch (goLeft a) (goLeft b)
+      ⟨(⟨a, by omega⟩ : Fin (a + 1)), moveLeftN a t⟩ rfl
+    rw [hsw, Tape.write_read (moveLeftN a t) hne]
+    rfl
+  -- `a+1` 步后落在右段起点
+  have hpre : (goLeft2 a b).run (a + 1) ⟨(goLeft2 a b).start, t⟩
+      = ⟨Fin.natAdd (a + 1) (goLeft b).start, moveLeftN a t⟩ := by
+    rw [run_add (goLeft2 a b) a 1 ⟨(goLeft2 a b).start, t⟩, hrun_a]
+    exact hstep
+  -- 右段不停机
+  have hnhB : ∀ i, i < j →
+      (goLeft b).halted ((goLeft b).run i ⟨(goLeft b).start, moveLeftN a t⟩) = false := by
+    intro i hi
+    rw [show (goLeft b).start = (⟨0, by omega⟩ : Fin (b + 1)) from rfl]
+    rw [goLeft_run_from b i 0 (moveLeftN a t) (by omega) hne]
+    exact goLeft_halted_false b (0 + i) (by omega) (moveLeftN i (moveLeftN a t))
+  -- 右段 `j` 步后的状态值
+  have hstate_j : ((goLeft2 a b).run j ⟨Fin.natAdd (a + 1) (goLeft b).start, moveLeftN a t⟩).state
+      = Fin.natAdd (a + 1) (⟨0 + j, by omega⟩ : Fin (b + 1)) := by
+    have := seqComp_embed_right (goLeft a) (goLeft b) j ⟨(goLeft b).start, moveLeftN a t⟩ hnhB
+    rw [show (goLeft b).start = (⟨0, by omega⟩ : Fin (b + 1)) from rfl,
+      goLeft_run_from b j 0 (moveLeftN a t) (by omega) hne] at this
+    exact congrArg Config.state this
+  -- 组装：状态值 = `(a+1) + (0+j) < a+1+b`
+  have hstate : ((goLeft2 a b).run ((a + 1) + j) ⟨(goLeft2 a b).start, t⟩).state.val
+      = (a + 1) + (0 + j) := by
+    rw [run_add (goLeft2 a b) (a + 1) j ⟨(goLeft2 a b).start, t⟩, hpre, hstate_j]
+    rfl
+  have hiff := goLeft2_halted_true_iff a b
+    ((goLeft2 a b).run ((a + 1) + j) ⟨(goLeft2 a b).start, t⟩)
+  rw [hstate] at hiff
+  have hne' : (a + 1) + (0 + j) ≠ (a + 1) + b := by omega
+  cases hb : (goLeft2 a b).halted
+      ((goLeft2 a b).run ((a + 1) + j) ⟨(goLeft2 a b).start, t⟩) with
+  | false => rfl
+  | true => exact absurd (hiff.mp hb) hne'
+
+/-- **`goLeft2` 全程不停机**（未走满 `a+1+b` 步）。
+    `goLeft2` never halts before completing its `a+1+b` steps. -/
+theorem goLeft2_halted_false (a b k : Nat) (t : Tape) (hk : k < a + 1 + b)
+    (hr : t.right ≠ []) :
+    (goLeft2 a b).halted ((goLeft2 a b).run k ⟨(goLeft2 a b).start, t⟩) = false := by
+  rcases Nat.lt_or_ge k (a + 1) with h | h
+  · exact goLeft2_halted_false_left a b k t (by omega) hr
+  · obtain ⟨j, rfl⟩ : ∃ j, k = (a + 1) + j := ⟨k - (a + 1), by omega⟩
+    exact goLeft2_halted_false_right a b t j (by omega) hr
+
 end DTM
 
 end Pnp
