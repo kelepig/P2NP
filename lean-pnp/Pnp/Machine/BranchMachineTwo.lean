@@ -772,6 +772,149 @@ theorem quad_le_two_pow (T : Nat) :
       = (T + 1) * (T + 1) + (10 * (T + 1) + 10) := by omega
   rw [hassoc]
   exact Nat.le_trans hsum hfin
+set_option maxHeartbeats 2000000 in
+/-- **逐分支整段步数的指数上界**：装配段 + 1 + 观察预算（含 `branchPad` 副垫）
+    不超过 `2^((2·2^b+42)(T+1) + (b+20))`。E 的 `hHalt` 逐分支步骤外壳。
+    Per-branch total step count (assembly + observer budget) is exponentially bounded. -/
+theorem branchRunStep_le_two_pow {q : Nat} (st : Fin q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (Z T B b : Nat) (hZ : Z ≤ T + 1) (hB : B ≤ 2 ^ b)
+    (hl' : l'.length ≤ T) :
+    expandCost (a :: l') + 1
+      + ((padStr (branchPad st w Z T B b - 1)).length + 1
+        + (3 * branchPad st w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+      + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+            (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+          + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)
+    ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 20)) := by
+  -- 记号：`m` 为右垫，`rc`/`BB` 为单轮成本与逐分支预算
+  have hm_pos : 1 ≤ branchPad st w Z T B b := branchPad_pos st w Z T B b
+  have hm_le : branchPad st w Z T B b ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 9)) :=
+    branchPad_le_two_pow st w Z T B b hZ hB
+  have hlen : (padStr (branchPad st w Z T B b - 1)).length = 3 * branchPad st w Z T B b :=
+    padStr_len_of_pos _ hm_pos
+  have hpre : (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length = T + 1 :=
+    Reg.initReg_pre_length st w (T + 1) _
+  have hrcEq : roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+        (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+      = roundCostStay (Reg.initReg st w (T + 1) 0) Z B (Reg.initReg st w (T + 1) 0).cur := rfl
+  have hmdef : branchPad st w Z T B b
+      = roundCostStay (Reg.initReg st w (T + 1) 0) Z B (Reg.initReg st w (T + 1) 0).cur
+        + branchBudget (T + 1) Z T B b + 1 := rfl
+  -- 观察预算 ≤ 右垫
+  have hrcBB : roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+          (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+        + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b
+      ≤ branchPad st w Z T B b := by
+    rw [hpre, hrcEq, hmdef]
+    omega
+  -- 装配段：`expandCost ≤ 2^(2(T+1)+6)`
+  have hexp : expandCost (a :: l') ≤ 2 ^ (2 * (T + 1) + 6) := by
+    have h1 := expandCost_le (a :: l')
+    have hlen' : (a :: l').length = l'.length + 1 := rfl
+    rw [hlen'] at h1
+    have hn : l'.length + 1 ≤ T + 1 := by omega
+    have h2 : (l'.length + 1) * (l'.length + 1) ≤ (T + 1) * (T + 1) :=
+      Nat.mul_le_mul hn hn
+    have h3 : 10 * (l'.length + 1) ≤ 10 * (T + 1) := Nat.mul_le_mul_left 10 hn
+    have h4 : (l'.length + 1) * (l'.length + 1) + 10 * (l'.length + 1) + 10
+        ≤ (T + 1) * (T + 1) + 10 * (T + 1) + 10 :=
+      Nat.add_le_add (Nat.add_le_add h2 h3) (Nat.le_refl 10)
+    exact Nat.le_trans (Nat.le_trans h1 h4) (quad_le_two_pow T)
+  -- 各分量都被 `2^M` 控制（`M := (2·2^b+42)(T+1)+(b+12)`）
+  have hA : expandCost (a :: l') ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) := by
+    refine Nat.le_trans hexp ?_
+    apply Nat.pow_le_pow_right (by decide : 1 ≤ 2)
+    have h1 : 2 * (T + 1) ≤ (2 * 2 ^ b + 42) * (T + 1) :=
+      Nat.mul_le_mul_right (T + 1) (by omega)
+    omega
+  have hB' : 6 * branchPad st w Z T B b ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) := by
+    have h8 : 6 * branchPad st w Z T B b ≤ 8 * branchPad st w Z T B b := by omega
+    have h9 : 8 * branchPad st w Z T B b
+        ≤ 8 * 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 9)) :=
+      Nat.mul_le_mul_left 8 hm_le
+    have h8eq : 8 * 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 9))
+        = 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) := by
+      rw [show (8 : Nat) = 2 ^ 3 from by decide, ← Nat.pow_add]
+      congr 1
+      omega
+    exact Nat.le_trans (Nat.le_trans h8 h9) (Nat.le_of_eq h8eq)
+  have hC : 3 * l'.length ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) := by
+    have hT : T ≤ 2 ^ T := self_le_two_pow T
+    have h1 : 3 * l'.length ≤ 4 * T := by omega
+    have h2 : 4 * T ≤ 4 * 2 ^ T := Nat.mul_le_mul_left 4 hT
+    have h3 : 4 * 2 ^ T = 2 ^ (T + 2) := by
+      rw [show (4 : Nat) = 2 ^ 2 from by decide, Nat.mul_comm, ← Nat.pow_add]
+    refine Nat.le_trans (Nat.le_trans h1 h2) ?_
+    rw [h3]
+    apply Nat.pow_le_pow_right (by decide : 1 ≤ 2)
+    have h1' : T + 1 ≤ (2 * 2 ^ b + 42) * (T + 1) := Nat.le_mul_of_pos_left _ (by omega)
+    omega
+  have hD : roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+          (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+        + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b
+      ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) := by
+    refine Nat.le_trans hrcBB ?_
+    refine Nat.le_trans hm_le ?_
+    apply Nat.pow_le_pow_right (by decide : 1 ≤ 2)
+    omega
+  have hE6 : 6 ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 12)) :=
+    Nat.le_trans (by decide : 6 ≤ 2 ^ 3)
+      (Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega))
+  -- 先把整段长度化成五项和，再逐对合并
+  have hsplit : expandCost (a :: l') + 1
+        + ((padStr (branchPad st w Z T B b - 1)).length + 1
+          + (3 * branchPad st w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+        + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+              (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+            + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)
+      = expandCost (a :: l') + 6 * branchPad st w Z T B b + 3 * l'.length
+        + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+              (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+            + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)
+        + 6 := by
+    rw [hlen]
+    omega
+  -- 主指数 `M`（局部定义：零依赖工程没有 Mathlib 的 `set` 战术）
+  let M := (2 * 2 ^ b + 42) * (T + 1) + (b + 12)
+  have hM : M = (2 * 2 ^ b + 42) * (T + 1) + (b + 12) := rfl
+  have h1 : expandCost (a :: l') + 6 * branchPad st w Z T B b ≤ 2 ^ (M + 1) :=
+    Nat.le_trans (Nat.add_le_add hA hB') (add_pow_le (Nat.le_refl M) (Nat.le_refl M))
+  have h2 : 3 * l'.length
+        + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+              (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+            + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)
+        ≤ 2 ^ (M + 1) :=
+    Nat.le_trans (Nat.add_le_add hC hD) (add_pow_le (Nat.le_refl M) (Nat.le_refl M))
+  have h12 : (expandCost (a :: l') + 6 * branchPad st w Z T B b)
+        + (3 * l'.length
+          + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+                (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+              + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b))
+        ≤ 2 ^ (M + 2) :=
+    Nat.le_trans (Nat.add_le_add h1 h2)
+      (add_pow_le (by omega : M + 1 ≤ M + 1) (by omega : M + 1 ≤ M + 1))
+  have h3 : 2 ^ (M + 2) + 6 ≤ 2 ^ (M + 3) :=
+    Nat.le_trans (Nat.add_le_add (Nat.le_refl _) hE6)
+      (add_pow_le (by omega : M + 2 ≤ M + 2) (by omega : M ≤ M + 2))
+  -- 收尾
+  rw [hsplit]
+  have h4 : expandCost (a :: l') + 6 * branchPad st w Z T B b + 3 * l'.length
+        + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+              (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+            + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)
+        + 6
+      = ((expandCost (a :: l') + 6 * branchPad st w Z T B b)
+          + (3 * l'.length
+            + (roundCostStay (Reg.initReg st w (T + 1) (branchPad st w Z T B b)) Z B
+                  (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).cur
+                + branchBudget (Reg.initReg st w (T + 1) (branchPad st w Z T B b)).pre.length Z T B b)))
+        + 6 := by omega
+  rw [h4]
+  refine Nat.le_trans (Nat.add_le_add h12 (Nat.le_refl 6)) ?_
+  refine Nat.le_trans h3 ?_
+  apply Nat.pow_le_pow_right (by decide : 1 ≤ 2)
+  rw [hM]
+  omega
 
 end DTM
 
