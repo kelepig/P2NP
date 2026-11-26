@@ -16,6 +16,7 @@
 
 import Pnp.Machine.DigitShape
 import Pnp.Machine.WalkLT
+import Pnp.Machine.Go
 
 namespace Pnp
 
@@ -2464,6 +2465,99 @@ theorem groupRound_run_none (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
           ++ (none :: (List.replicate (2 * k + 3) (some true) ++ (some false :: L.drop (k + 2)))))
         (some true :: (none :: R)) :=
   groupRound_run B k q hkB hq none (by decide) L R hlen
+
+/-- `n` 个 `a` 之后接 `t`，右移 `n` 格即 `t`。 -/
+theorem drop_replicate_append (n : Nat) (a : Sym) (t : List Sym) :
+    (List.replicate n a ++ t).drop n = t := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+      show (List.replicate n a ++ t).drop n = t
+      exact ih
+
+/-- 组循环一轮（四段）：写块 → 右进 `k+2` → 抹掉旧段 `k+1` 格 → 找下一段。 -/
+def groupRoundE (B k q : Nat) (t : Tape) : Tape :=
+  let t1 : Tape := ((readWriteSeg B).run (2 * k + 5)
+    (Config.mk (⟨0, by omega⟩ : Fin (2 * B + 6)) t)).tape
+  let t2 : Tape := moveRightN (k + 2) t1
+  let t3 : Tape := ((eraseCells (k + 1)).run (k + 1)
+    (Config.mk (⟨0, by omega⟩ : Fin (k + 1 + 1)) t2)).tape
+  ((seekSegR.run (1 + q + 1) (Config.mk (0 : Fin 3) t3))).tape
+
+theorem groupRoundE_run (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
+    (L R : List Sym) (hlen : k + 2 ≤ L.length) :
+    groupRoundE B k q
+        (Tape.mk (List.replicate k (some true) ++ (none :: L))
+          (some true :: (none :: (List.replicate q (some true) ++ (none :: R)))))
+      = Tape.mk (List.replicate (q - 1) (some true)
+          ++ (List.replicate (k + 2) none
+            ++ (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2)))))
+        (some true :: (none :: R)) := by
+  simp only [groupRoundE]
+  -- ① 写块（纸带级投影）
+  have h1 : ((readWriteSeg B).run (2 * k + 5)
+        (Config.mk (⟨0, by omega⟩ : Fin (2 * B + 6))
+          (Tape.mk (List.replicate k (some true) ++ (none :: L))
+            (some true :: (none :: (List.replicate q (some true) ++ (none :: R))))))).tape
+      = Tape.mk (some false :: L.drop (k + 2))
+          (List.replicate (2 * k + 3) (some true)
+            ++ (none :: (List.replicate q (some true) ++ (none :: R)))) := by
+    rw [readWriteSeg_run_pad B k hkB none (by decide) L
+      (List.replicate q (some true) ++ (none :: R)) hlen]
+  rw [h1]
+  -- ② 右进 k+2 格（真格串拆成 (k+2) + (k+1)）
+  rw [show List.replicate (2 * k + 3) (some true)
+      = List.replicate (k + 2) (some true) ++ List.replicate (k + 1) (some true) from by
+    rw [List.replicate_append_replicate]
+    rw [show k + 2 + (k + 1) = 2 * k + 3 from by omega]]
+  rw [show (List.replicate (k + 2) (some true) ++ List.replicate (k + 1) (some true))
+        ++ (none :: (List.replicate q (some true) ++ (none :: R)))
+      = List.replicate (k + 2) (some true)
+        ++ (List.replicate (k + 1) (some true)
+          ++ (none :: (List.replicate q (some true) ++ (none :: R)))) from by
+    rw [List.append_assoc]]
+  rw [moveRightN_replicate (k + 2) (some false :: L.drop (k + 2)) (some true)
+    (List.replicate (k + 1) (some true)
+      ++ (none :: (List.replicate q (some true) ++ (none :: R))))]
+  -- ③ 抹掉旧段 k+1 格
+  have h3 : ((eraseCells (k + 1)).run (k + 1)
+        (Config.mk (⟨0, by omega⟩ : Fin (k + 1 + 1))
+          (Tape.mk (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2)))
+            (List.replicate (k + 1) (some true)
+              ++ (none :: (List.replicate q (some true) ++ (none :: R))))))).tape
+      = Tape.mk (List.replicate (k + 1) none
+          ++ (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2))))
+        ((List.replicate (k + 1) (some true)
+          ++ (none :: (List.replicate q (some true) ++ (none :: R)))).drop (k + 1)) := by
+    rw [eraseCells_run (k + 1) (k + 1) (by omega)]
+  rw [h3]
+  rw [drop_replicate_append (k + 1) (some true)
+    (none :: (List.replicate q (some true) ++ (none :: R)))]
+  -- ④ 找下一段
+  rw [show (none :: (List.replicate q (some true) ++ (none :: R)))
+      = (List.replicate (1 : Nat) none ++ List.replicate q (some true)) ++ (none :: R) from by
+    rw [show List.replicate (1 : Nat) none = ([none] : List Sym) from rfl,
+      List.singleton_append, List.cons_append]]
+  have h4 : ((seekSegR.run (1 + q + 1)
+        (Config.mk (0 : Fin 3)
+          (Tape.mk (List.replicate (k + 1) none
+              ++ (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2))))
+            ((List.replicate (1 : Nat) none ++ List.replicate q (some true)) ++ (none :: R)))))).tape
+      = Tape.mk (List.replicate (q - 1) (some true)
+          ++ (List.replicate (1 : Nat) none
+            ++ (List.replicate (k + 1) none
+              ++ (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2))))))
+        (some true :: (none :: R)) := by
+    rw [seekSegR_run 1 q (by omega) hq
+      (List.replicate (k + 1) none
+        ++ (List.replicate (k + 2) (some true) ++ (some false :: L.drop (k + 2)))) R]
+    rw [List.append_assoc]
+  rw [h4]
+  -- 收尾：左带的两段空白合并成 `replicate (k+2) none`
+  rw [show List.replicate (1 : Nat) none = ([none] : List Sym) from rfl,
+    List.singleton_append]
+  rfl
+
 
 /-- 计数器区右带：各段（`k+1` 个真格）之间以单个空白隔开。 -/
 def segRight : List Nat → List Sym → List Sym
