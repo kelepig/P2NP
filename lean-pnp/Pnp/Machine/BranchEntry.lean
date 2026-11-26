@@ -582,6 +582,75 @@ theorem costCap_Z_shift (P Z d T Bk : Nat) :
 def branchBudget (P Z T B b : Nat) : Nat :=
   T * costCap P Z T (2 ^ b) + 2 * (B + 3) * (T + 1) + 6
 
+/-- **逐分支预算的指数上界**：`P, Z ≤ T` 且 `B ≤ 2^b` 时
+    `branchBudget P Z T B b ≤ 2^((2·2^b+42)·T + (b+8))`。
+    Exponential bound on the per-branch budget (E's `hHalt` arithmetic). -/
+theorem branchBudget_le_two_pow (P Z T B b : Nat) (hP : P ≤ T) (hZ : Z ≤ T)
+    (hB : B ≤ 2 ^ b) :
+    branchBudget P Z T B b ≤ 2 ^ ((2 * 2 ^ b + 42) * T + (b + 8)) := by
+  unfold branchBudget
+  -- 第一部分：单分支通路成本被 `2^((2·2^b+42)·T)` 吸收
+  have h1 : T * costCap P Z T (2 ^ b) ≤ 2 ^ ((2 * 2 ^ b + 42) * T) :=
+    Nat.le_trans (Nat.mul_le_mul_left T (costCap_le_poly P Z T (2 ^ b) hP hZ))
+      (polyCost_mul_le (2 ^ b) T)
+  -- 第二部分：`2·(B+3) ≤ 2^(b+3)`
+  have hcoef : 2 * (B + 3) ≤ 2 ^ (b + 3) := by
+    have h1' : 2 * (B + 3) ≤ 2 * (2 ^ b + 3) :=
+      Nat.mul_le_mul_left 2 (Nat.add_le_add_right hB 3)
+    have h2' : 2 * (2 ^ b + 3) ≤ 2 ^ (b + 3) := by
+      have hp : 2 ^ (b + 3) = 8 * 2 ^ b := by
+        rw [Nat.pow_add]
+        rw [show 2 ^ 3 = 8 from by decide]
+        exact Nat.mul_comm (2 ^ b) 8
+      have h6 : 6 ≤ 6 * 2 ^ b := by
+        have hp1 : 1 ≤ 2 ^ b := Nat.one_le_two_pow
+        omega
+      rw [hp]
+      omega
+    exact Nat.le_trans h1' h2'
+  -- 第二部分收尾：`2·(B+3)·(T+1) + 6 ≤ 2^(b+5+T)`
+  have h2 : 2 * (B + 3) * (T + 1) + 6 ≤ 2 ^ (b + 5 + T) := by
+    have hmul : 2 * (B + 3) * (T + 1) ≤ 2 ^ (b + 4 + T) := by
+      refine Nat.le_trans (Nat.mul_le_mul hcoef (self_le_two_pow (T + 1))) ?_
+      rw [← Nat.pow_add]
+      exact Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega)
+    have h6 : 6 ≤ 2 ^ (b + 4 + T) :=
+      Nat.le_trans (by decide : 6 ≤ 2 ^ 3)
+        (Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega))
+    calc 2 * (B + 3) * (T + 1) + 6 ≤ 2 ^ (b + 4 + T) + 2 ^ (b + 4 + T) :=
+          Nat.add_le_add hmul h6
+      _ = 2 * 2 ^ (b + 4 + T) := (Nat.two_mul _).symm
+      _ = 2 ^ ((b + 4 + T) + 1) := by
+          rw [Nat.pow_succ]; exact Nat.mul_comm 2 _
+      _ = 2 ^ (b + 5 + T) := by
+          rw [show (b + 4 + T) + 1 = b + 5 + T from by omega]
+  -- 合并两段，用「两幂之和被最大指数 +1 吸收」
+  have hsum : (T * costCap P Z T (2 ^ b) + 2 * (B + 3) * (T + 1)) + 6
+      ≤ 2 ^ ((2 * 2 ^ b + 42) * T) + 2 ^ (b + 5 + T) := by
+    rw [Nat.add_assoc]
+    exact Nat.add_le_add h1 h2
+  have hM1 : (2 * 2 ^ b + 42) * T ≤ (2 * 2 ^ b + 42) * T + (b + 8) :=
+    Nat.le_add_right _ _
+  -- 主项 `X·T` 已不小于 `T`（`X = 2·2^b + 42`）
+  have hp1 : 1 ≤ 2 * 2 ^ b + 42 := by omega
+  have hTle : T ≤ (2 * 2 ^ b + 42) * T := by
+    simpa using Nat.mul_le_mul_right T hp1
+  have hM2 : b + 5 + T ≤ (2 * 2 ^ b + 42) * T + (b + 8) := by
+    have step1 : b + 5 + T ≤ T + (b + 8) := by omega
+    exact Nat.le_trans step1 (Nat.add_le_add_right hTle (b + 8))
+  have hmax : max ((2 * 2 ^ b + 42) * T) (b + 5 + T) + 1
+      ≤ (2 * 2 ^ b + 42) * T + (b + 8) := by
+    rcases Nat.le_total ((2 * 2 ^ b + 42) * T) (b + 5 + T) with h | h
+    · rw [Nat.max_eq_right h]
+      exact Nat.le_trans (by omega : b + 5 + T + 1 ≤ T + (b + 8))
+        (Nat.add_le_add_right hTle (b + 8))
+    · rw [Nat.max_eq_left h]
+      exact Nat.add_le_add_left (by omega : 1 ≤ b + 8) _
+  exact Nat.le_trans hsum
+    (Nat.le_trans
+      (add_pow_le (Nat.le_max_left _ _) (Nat.le_max_right _ _))
+      (Nat.pow_le_pow_right (by decide : 1 ≤ 2) hmax))
+
 /-- **单轮成本对 `z`、`k` 单调**：更大的零计数与更大的头块值只会更贵。
     A stay round costs no less when `z` and `k` grow. -/
 theorem roundCostStay_mono {q : Nat} (x : Reg q) (z z' k k' : Nat) (s' : Sym)
