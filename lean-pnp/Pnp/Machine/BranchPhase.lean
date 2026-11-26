@@ -71,6 +71,39 @@ theorem exists_branch_obsPhase_accept_of_acceptsWithin {q : Nat} (M : NTM q) {B 
   exact ⟨t, i, ht1, htT, hi,
     (obsPhase_accept_iff q b ((M.stutter).haltNorm) _ _).mpr hhit⟩
 
+/-- **分支级可靠性（运行相位机版）**：某分支的运行相位机在统一预算内停在接受态 ⇒
+    原机 `w` 在 `T'` 步内接受。把 `obsPhase` 的关注接受经 `obsPhase_accept_iff` 换回观察机命中，
+    再调 `acceptsWithin_of_branch_hit`。
+    Branch soundness (phase-machine version): if a branch's run phase stops at the accept
+    state within the uniform budget, then `M` accepts `w` within `T'` steps. -/
+theorem acceptsWithin_of_branch_obsPhase_acc (q b B T i : Nat) (M : NTM q) (w : List Bool)
+    (T' : Nat)
+    (hB : 0 < B) (hb : B + 2 < 2 ^ b)
+    (hl : ∀ m a, ((M.stutter).step m a).length ≤ B + 1)
+    (Z c : Nat) (hc : c < 2 ^ b) (x : Reg q) (m : Nat) (hm : m < q)
+    (hx : x.state = (⟨m, hm⟩ : Fin q))
+    (hxM : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hpre : ∀ p0 ∈ x.pre, p0.2 = false) (hpost : ∀ p0 ∈ x.post, p0.2 = false)
+    (hpadpost : (branchBlocks B T i).length + 1 ≤ x.post.length)
+    (hpadpre : (branchBlocks B T i).length + 1 ≤ x.pre.length)
+    (hlen : (branchBlocks B T i).length ≤ T')
+    (hAcc : ((obsPhase q b ((M.stutter).haltNorm)).run
+      (T' * costCap x.pre.length Z T' (2 ^ b) + 6)
+      ⟨embOb q b (obsStart q b (M.stutter) x m c Z hm hc (branchBlocks B T i)).state,
+        (obsStart q b (M.stutter) x m c Z hm hc (branchBlocks B T i)).tape⟩).state
+      = (obsPhase q b ((M.stutter).haltNorm)).accept) :
+    M.AcceptsWithin w T' := by
+  -- 运行相位机接受 ⇒ 观察机命中（`obsPhase_accept_iff` 的从左到右）
+  have hHit : ((simObs q b ((M.stutter).haltNorm)).run
+      (T' * costCap x.pre.length Z T' (2 ^ b) + 6)
+      (Config.mk (embO q b (passStart x m c hm hc Z (branchBlocks B T i)).state)
+        (passStart x m c hm hc Z (branchBlocks B T i)).tape)).state = obsAcc q b :=
+    (obsPhase_accept_iff q b ((M.stutter).haltNorm) _
+      (obsStart q b (M.stutter) x m c Z hm hc (branchBlocks B T i))).mp hAcc
+  -- 观察机命中 ⇒ 原机接受（#139 的分支级可靠性）
+  exact acceptsWithin_of_branch_hit q b B T i M w T' hB hb hl Z c hc x m hm hx hxM hxw
+    hpre hpost hpadpost hpadpre hlen hHit
+
 end DTM
 
 end Pnp
