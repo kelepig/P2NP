@@ -120,6 +120,7 @@ import Pnp.Machine.ObsBudget
 import Pnp.Machine.BranchPhase
 import Pnp.Machine.Locality
 import Pnp.Machine.RightPad
+import Pnp.Machine.BranchPad
 import Pnp.Machine.MulCopy
 import Pnp.Machine.MulConsume
 import Pnp.Machine.MulRestore
