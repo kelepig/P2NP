@@ -107,6 +107,7 @@ import Pnp.Machine.PadConv
 import Pnp.Machine.WalkLT
 import Pnp.Machine.MarkTrue
 import Pnp.Machine.WalkRT
+import Pnp.Machine.LenSeek
 import Pnp.Machine.UnaryAdd
 import Pnp.Machine.WalkLC
 import Pnp.Machine.WalkRC
