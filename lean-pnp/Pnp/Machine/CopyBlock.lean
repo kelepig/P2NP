@@ -1036,6 +1036,12 @@ def srcCells (cs : List Sym) : List Sym :=
     srcCells (a :: rest) = codeFst a :: codeSnd a :: some true :: srcCells rest := by
   simp [srcCells]
 
+/-- 空源块编码为空。 The empty source block encodes to the empty list. -/
+@[simp] theorem srcCells_nil : srcCells ([] : List Sym) = [] := rfl
+
+/-- 空区域的格编码为空。 The empty region encodes to the empty list. -/
+@[simp] theorem codeCells_nil : codeCells ([] : List (Sym × Bool)) = [] := rfl
+
 /-- 区域两端各补一格后的逆序展开（供末轮目标改写）。
     Inserting one mirror cell at both ends, unfolded in reverse order. -/
 theorem codeCells_double (a : Sym) (q : List (Sym × Bool)) :
@@ -1360,6 +1366,33 @@ theorem copyCells_round' (a a2 : Sym) (cs : List (Sym × Bool))
         simpa only [codeFst, codeSnd, symCode, List.headD_cons, List.drop_zero,
           List.drop_succ_cons] using copyCells_round a cs hcs E E' hE hE' true true tail L2
 
+/-- 一轮转写（区域任意，含空区）：成本 `6|q| + 15`，停在下一格的标记位上。
+    One transcription round for an arbitrary region (empty region included). -/
+theorem copyCells_roundAll (a a2 : Sym) (q : List (Sym × Bool)) (hq : ∀ p ∈ q, p.2 = false)
+    (L2 tail : List Sym) :
+    copyCells.run (6 * q.length + 15)
+      ⟨(⟨10, by omega⟩ : Fin 128),
+        Tape.mk (codeSnd a :: codeFst a :: ((codeCells q).reverse ++ none :: none :: none :: L2))
+          (some true :: codeFst a2 :: codeSnd a2 :: some true :: tail)⟩
+      = ⟨(⟨10, by omega⟩ : Fin 128),
+          Tape.mk (codeSnd a2 :: codeFst a2 :: ((codeCells (q ++ [(a, false)])).reverse ++
+              some false :: codeSnd a :: codeFst a :: L2)) (some true :: tail)⟩ := by
+  cases q with
+  | nil =>
+      simpa only [codeCells_nil, List.length_nil, Nat.mul_zero, Nat.zero_add,
+        List.reverse_nil, List.nil_append, List.cons_append] using copyCells_roundFirst' a a2 tail L2
+  | cons c ps =>
+      obtain ⟨E', hE'⟩ := codeCells_reverse_head (c :: ps) hq (by simp)
+      have hlen : E'.length + 1 = 3 * (c :: ps).length := by
+        have hlen' := congrArg List.length hE'
+        rw [List.length_reverse, codeCells_length] at hlen'
+        simpa only [List.length_cons] using hlen'.symm
+      have hcost : 6 * (c :: ps).length + 15
+          = 3 + (E'.length + 2) + 3 + 2 + (3 * ((c :: ps).length + 1) + 3) := by
+        omega
+      rw [hcost]
+      exact copyCells_round' a a2 (c :: ps) hq ((codeCells (c :: ps)).reverse) E' rfl hE' tail L2
+
 
 /-- 末轮单圈（任意区域 `q`）：成本 `6|q| + 13`，停在 `99`。 -/
 theorem copyCells_roundLastAll (a : Sym) (q : List (Sym × Bool)) (hq : ∀ p ∈ q, p.2 = false)
@@ -1374,9 +1407,9 @@ theorem copyCells_roundLastAll (a : Sym) (q : List (Sym × Bool)) (hq : ∀ p �
             (none :: tail)⟩ := by
   cases q with
   | nil =>
-      simpa only [List.length_nil, Nat.mul_zero, Nat.zero_add, List.append_nil, List.nil_append,
-        List.reverse_nil, List.cons_append, codeCells_append, List.append_assoc] using
-        copyCells_roundLastNil a L2 tail
+      simpa only [codeCells_nil, List.length_nil, Nat.mul_zero, Nat.zero_add,
+        List.reverse_nil, List.nil_append, List.singleton_append,
+        List.cons_append, List.append_assoc] using copyCells_roundLastNil a L2 tail
   | cons c ps =>
       obtain ⟨E', hE'⟩ := codeCells_reverse_head (c :: ps) hq (by simp)
       have hlen : E'.length + 1 = 3 * (c :: ps).length := by
@@ -1410,17 +1443,17 @@ theorem copyCells_run (a : Sym) :
       rw [show copyCost q.length (([].length) + 1) = 6 * q.length + 13 from by
         simpa using copyCost_last q.length]
       rw [show List.replicate (3 * (([].length) + 1)) none = [none, none, none] from by simp]
-      simpa only [List.length_nil, Nat.zero_add, List.map_nil, List.reverse_nil,
-        List.nil_append, List.cons_append, codeCells, List.flatMap_nil, List.append_assoc]
+      simpa only [srcCells_nil, List.map_nil, List.reverse_nil, List.nil_append,
+        List.append_nil, List.singleton_append, List.cons_append, List.append_assoc]
         using copyCells_roundLastAll a q hq L2 tail
   | a2 :: rest', q, hq, L2, tail => by
-      -- 成本递推：一次非末轮（6|q|+15）+ 剩余（少一格、区域多两格）
+      -- 成本递推：一轮（6|q|+15）+ 剩余（少一格、区域两端各加一格）
       have hcost : copyCost q.length ((a2 :: rest').length + 1)
           = (6 * q.length + 15) + copyCost (q.length + 2) (rest'.length + 1) := by
         simp only [List.length_cons]
         exact copyCost_step q.length (rest'.length + 1) (by omega)
       rw [hcost]
-      -- 空白垫：3r 个 = 3 + 3(r-1) 个
+      -- 空白垫：3(r+1) 个 = 3 + 3r 个
       rw [show List.replicate (3 * ((a2 :: rest').length + 1)) none
             = none :: none :: none :: List.replicate (3 * (rest'.length + 1)) none from by
           simp only [List.length_cons]
@@ -1431,73 +1464,40 @@ theorem copyCells_run (a : Sym) :
             = some true :: codeFst a2 :: codeSnd a2 :: some true ::
                 (srcCells rest' ++ none :: tail) from by
           rw [srcCells_cons]; simp only [List.cons_append]]
-      cases q with
-      | nil =>
-          -- 首轮：copyCells_roundFirst'（15 步）
-          rw [show (6 * ([] : List (Sym × Bool)).length + 15) = 15 from by simp]
-          rw [DTM.run_add copyCells 15 (copyCost (0 + 2) (rest'.length + 1))]
-          rw [show copyCells.run 15
-                ⟨(⟨10, by omega⟩ : Fin 128),
-                  Tape.mk (codeSnd a :: codeFst a :: none :: none :: none ::
-                      List.replicate (3 * (rest'.length + 1)) none ++ L2)
-                    (some true :: codeFst a2 :: codeSnd a2 :: some true ::
-                      (srcCells rest' ++ none :: tail))⟩
-              = ⟨(⟨10, by omega⟩ : Fin 128),
-                  Tape.mk (codeSnd a2 :: codeFst a2 :: (codeCells [(a, false)]).reverse ++
-                      some false :: codeSnd a :: codeFst a ::
-                      (List.replicate (3 * (rest'.length + 1)) none ++ L2))
-                    (some true :: (srcCells rest' ++ none :: tail))⟩
-              from copyCells_roundFirst' a a2 (srcCells rest' ++ none :: tail)
-                (List.replicate (3 * (rest'.length + 1)) none ++ L2)]
-          rw [codeCells_first_rev_tail a (List.replicate (3 * (rest'.length + 1)) none ++ L2)]
-          simpa only [List.map_cons, List.reverse_cons, List.reverse_append,
-            List.singleton_append, List.map_nil, List.reverse_nil, List.nil_append,
-            List.cons_append, List.append_assoc, List.length_append, List.length_cons,
-            List.length_nil, Nat.zero_add, Nat.add_zero]
-            using copyCells_run a2 rest' ([(a, false)] ++ [(a, false)])
-              (by intro p hp
-                  simp only [List.mem_append, List.mem_singleton] at hp
-                  rcases hp with hp | hp <;> rw [hp]) L2 tail
-      | cons c ps =>
-          -- 后续轮：copyCells_round'（6|q|+15 步）
-          obtain ⟨E', hE'⟩ := codeCells_reverse_head (c :: ps) hq (by simp)
-          have hlen : E'.length + 1 = 3 * (c :: ps).length := by
-            have hlen' := congrArg List.length hE'
-            rw [codeCells_length, List.length_reverse] at hlen'
-            simp only [List.length_cons] at hlen'
-            omega
-          have hcost' : 6 * (c :: ps).length + 15
-              = 3 + (E'.length + 2) + 3 + 2 + (3 * ((c :: ps).length + 1) + 3) := by
-            omega
-          rw [hcost']
-          rw [DTM.run_add copyCells (3 + (E'.length + 2) + 3 + 2 + (3 * ((c :: ps).length + 1) + 3))
-            (copyCost ((c :: ps).length + 2) (rest'.length + 1))]
-          rw [show copyCells.run (3 + (E'.length + 2) + 3 + 2 + (3 * ((c :: ps).length + 1) + 3))
-                ⟨(⟨10, by omega⟩ : Fin 128),
-                  Tape.mk (codeSnd a :: codeFst a ::
-                      ((codeCells (c :: ps)).reverse ++ none :: none :: none ::
-                        List.replicate (3 * (rest'.length + 1)) none ++ L2))
-                    (some true :: codeFst a2 :: codeSnd a2 :: some true ::
-                      (srcCells rest' ++ none :: tail))⟩
-              = ⟨(⟨10, by omega⟩ : Fin 128),
-                  Tape.mk (codeSnd a2 :: codeFst a2 ::
-                      (codeCells ((c :: ps) ++ [(a, false)])).reverse ++
-                      some false :: codeSnd a :: codeFst a ::
-                      (List.replicate (3 * (rest'.length + 1)) none ++ L2))
-                    (some true :: (srcCells rest' ++ none :: tail))⟩
-              from copyCells_round' a a2 (c :: ps) hq ((codeCells (c :: ps)).reverse) E' rfl hE'
-                (srcCells rest' ++ none :: tail)
-                (List.replicate (3 * (rest'.length + 1)) none ++ L2)]
-          rw [codeCells_mid_rev_tail a (c :: ps) (List.replicate (3 * (rest'.length + 1)) none ++ L2)]
-          simpa only [List.map_cons, List.reverse_cons, List.reverse_append,
-            List.singleton_append, List.map_nil, List.reverse_nil, List.nil_append,
-            List.cons_append, List.append_assoc, List.length_append, List.length_cons,
-            List.length_nil, Nat.zero_add, Nat.add_zero]
-            using copyCells_run a2 rest' ([(a, false)] ++ (c :: ps) ++ [(a, false)])
-              (by intro p hp
-                  simp only [List.mem_append, List.mem_singleton] at hp
-                  rcases hp with hp | hp <;> rw [hp]) L2 tail
-
+      -- 左带拼接归一为右结合、cons 形式（供一轮引理匹配）
+      simp only [List.append_assoc, List.cons_append]
+      rw [DTM.run_add copyCells (6 * q.length + 15) (copyCost (q.length + 2) (rest'.length + 1))]
+      -- 一轮转写（区域任意）
+      rw [show copyCells.run (6 * q.length + 15)
+            ⟨(⟨10, by omega⟩ : Fin 128),
+              Tape.mk (codeSnd a :: codeFst a :: ((codeCells q).reverse ++
+                  none :: none :: none ::
+                  (List.replicate (3 * (rest'.length + 1)) none ++ L2)))
+                (some true :: codeFst a2 :: codeSnd a2 :: some true ::
+                  (srcCells rest' ++ none :: tail))⟩
+          = ⟨(⟨10, by omega⟩ : Fin 128),
+              Tape.mk (codeSnd a2 :: codeFst a2 :: ((codeCells (q ++ [(a, false)])).reverse ++
+                  some false :: codeSnd a :: codeFst a ::
+                  (List.replicate (3 * (rest'.length + 1)) none ++ L2)))
+                (some true :: (srcCells rest' ++ none :: tail))⟩
+          from copyCells_roundAll a a2 q hq (List.replicate (3 * (rest'.length + 1)) none ++ L2)
+            (srcCells rest' ++ none :: tail)]
+      -- 当前格并入区域左端，供归纳假设匹配
+      rw [codeCells_mid_rev_tail a q (List.replicate (3 * (rest'.length + 1)) none ++ L2)]
+      rw [show copyCost (q.length + 2) (rest'.length + 1)
+            = copyCost (([(a, false)] ++ q ++ [(a, false)]).length) (rest'.length + 1) from by
+          simp]
+      simpa only [List.map_cons, List.reverse_cons, List.reverse_append,
+        List.singleton_append, List.map_nil, List.reverse_nil, List.nil_append,
+        List.cons_append, List.append_assoc]
+        using copyCells_run a2 rest' ([(a, false)] ++ q ++ [(a, false)])
+          (by
+            intro p hp
+            simp only [List.mem_append, List.mem_singleton] at hp
+            rcases hp with (hp | hp) | hp
+            · rw [hp]
+            · exact hq p hp
+            · rw [hp]) L2 tail
 
 
 end DTM
