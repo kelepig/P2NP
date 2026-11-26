@@ -631,6 +631,68 @@ theorem lenRound_rounds (ps ts : List (Sym × Bool)) (k p : Nat) (R : List Sym)
         rw [List.length_cons]; omega]
       simp only [List.map_cons, List.singleton_append, List.append_assoc]
 
+/-- **相位 0 见空白**：进入边界耗尽态 4（纸带不动，一步）。
+    Phase 0 meeting a blank enters the exhaustion state 4 (one step, tape unchanged). -/
+theorem lenRound_step0_blank (L R : List Sym) :
+    lenRound.run 1 ⟨(⟨0, by omega⟩ : Fin 11), Tape.mk L (none :: R)⟩
+      = ⟨(⟨4, by omega⟩ : Fin 11), Tape.mk L (none :: R)⟩ := by
+  rw [estepLR 0 (by omega) none (⟨4, by omega⟩ : Fin 11) none Dir.stay
+    (by rfl) L R (by omega)]
+  etape
+
+/-- **长度计数收尾**：格块已全部标记 `some false` 时，从块左端出发 `3|cs| + 2` 步走完整块、
+在分隔空白处进入耗尽态 4、再一步停机（10）；左带为扫过符号的逆序。
+    Finishing phase: scanning an all-`false` block and halting, in `3|cs| + 2` steps. -/
+theorem lenRound_finish (cs : List (Sym × Bool)) (L P : List Sym)
+    (hcs : ∀ c ∈ cs, c.2 = false) :
+    lenRound.run (3 * cs.length + 2)
+      ⟨(⟨0, by omega⟩ : Fin 11), Tape.mk L (codeCells cs ++ none :: P)⟩
+      = ⟨(⟨10, by omega⟩ : Fin 11), Tape.mk ((codeCells cs).reverse ++ L) (none :: P)⟩ := by
+  rw [show 3 * cs.length + 2 = 3 * cs.length + (1 + 1) from by omega]
+  rw [DTM.run_add lenRound (3 * cs.length) (1 + 1)]
+  rw [lenRound_scan_false cs L (none :: P) hcs]
+  rw [DTM.run_add lenRound 1 1]
+  rw [lenRound_step0_blank ((codeCells cs).reverse ++ L) P]
+  rw [lenRound_exhaust none ((codeCells cs).reverse ++ L) P]
+
+/-- **长度计数整段**：全 `true` 格块 `cs`、计数器初值 `k`、左侧前沿 `p ≥ |cs|` 格空白；
+    `lenRoundSteps |cs| 0 k + (3|cs| + 2)` 步后停机（10），计数器 `k + |cs|`，
+    所有格标记翻成 `false`。这是「机内算出 `n = |w|`」段的完整规格。
+    The whole length-counting section: `|cs|` rounds plus the finishing phase, halting at 10
+    with counter `k + |cs|` and every cell marker flipped to `false`. -/
+theorem lenRound_full (cs : List (Sym × Bool)) (k p : Nat) (R : List Sym)
+    (hcs : ∀ c ∈ cs, c.2 = true) (hp : cs.length ≤ p) :
+    lenRound.run (lenRoundSteps cs.length 0 k + (3 * cs.length + 2))
+      ⟨(⟨0, by omega⟩ : Fin 11),
+        Tape.mk ((none :: List.replicate k (some true)) ++ List.replicate p none)
+          (codeCells cs ++ none :: R)⟩
+      = ⟨(⟨10, by omega⟩ : Fin 11),
+          Tape.mk ((codeCells (cs.map (fun c => (c.1, false)))).reverse
+              ++ ((none :: List.replicate (k + cs.length) (some true))
+                  ++ List.replicate (p - cs.length) none))
+            (none :: R)⟩ := by
+  -- 翻转后各格的标记都是 false
+  have hmap : ∀ c ∈ cs.map (fun c => (c.1, false)), c.2 = false := by
+    intro c hc
+    obtain ⟨d, _, he⟩ := List.mem_map.mp hc
+    rw [← he]
+  rw [DTM.run_add lenRound (lenRoundSteps cs.length 0 k) (3 * cs.length + 2)]
+  -- 首段：n 轮计数（空前缀 `ps = []`、块 `ts = cs`、块后是分隔空白 `none :: R`）
+  have hstep0 : lenRoundSteps cs.length 0 k
+      = lenRoundSteps cs.length ([] : List (Sym × Bool)).length k := rfl
+  rw [hstep0]
+  rw [show codeCells cs ++ none :: R
+        = codeCells ([] : List (Sym × Bool)) ++ codeCells cs ++ none :: R from by
+      simp [codeCells]]
+  rw [lenRound_rounds [] cs k p (none :: R) (by simp) hcs hp]
+  simp only [List.nil_append]
+  -- 收尾段：全 false 块扫完并在分隔空白处停机
+  rw [show 3 * cs.length + 2 = 3 * (cs.map (fun c => (c.1, false))).length + 2 from by
+    rw [List.length_map]]
+  rw [lenRound_finish (cs.map (fun c => (c.1, false)))
+    ((none :: List.replicate (k + cs.length) (some true))
+      ++ List.replicate (p - cs.length) none) R hmap]
+
 end DTM
 
 end Pnp
