@@ -131,6 +131,7 @@ import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
 import Pnp.Machine.AlignChain
 import Pnp.Machine.BranchEntry
+import Pnp.Machine.BranchMachine
 import Pnp.IndexedSimulation
 import Pnp.Search
 import Pnp.TapeEncoding
