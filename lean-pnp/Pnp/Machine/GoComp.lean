@@ -106,6 +106,18 @@ theorem goLeft2_halted_false_left (a b k : Nat) (t : Tape) (hk : k ≤ a) (hr : 
     ((goLeft a).run k ⟨(goLeft a).start, t⟩).state).2
   exact halted_false_of_ne (goLeft2 a b) _ h1.symm h2.symm
 
+/-- **`goLeft2` 的停机判据**：整台组合机只在「右段走完」的那个状态停机
+    （`goLeft` 的接受态与拒绝态相同，故组合机的终止态唯一）。
+    有了它，「`k < a+1+b` 时不停机」只需比对状态数值即可。
+    `goLeft2` halts exactly at its single terminal state, characterized by state value. -/
+theorem goLeft2_halted_true_iff (a b : Nat) (c : Config ((a + 1) + (b + 1))) :
+    (goLeft2 a b).halted c = true ↔ c.state.val = (a + 1) + b := by
+  have hAR : (goLeft2 a b).accept = (goLeft2 a b).reject := rfl
+  rw [Bool.eq_iff_iff, halted, hAR, Bool.or_self, beq_iff_eq, Fin.ext_iff]
+  rw [show (goLeft2 a b).reject.val = (a + 1) + (goLeft b).reject.val from rfl]
+  rw [show (goLeft b).reject.val = b from rfl]
+  simp
+
 end DTM
 
 end Pnp
