@@ -191,9 +191,9 @@ theorem simObs_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
     (simObs q b ((M.stutter).haltNorm)).run (roundCostStay x Z k x.cur)
       ⟨(simObs q b ((M.stutter).haltNorm)).start,
         x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩
-      = Config.mk (embO q b (passStart x x.state.val (k + 1) x.state.isLt (by omega)
+      = Config.mk (embO q b (passStart x x.state.val (k + 1) x.state.isLt (show k + 1 < 2 ^ b from by omega)
             (Z + k + 3) ks).state)
-          (passStart x x.state.val (k + 1) x.state.isLt (by omega) (Z + k + 3) ks).tape := by
+          (passStart x x.state.val (k + 1) x.state.isLt (show k + 1 < 2 ^ b from by omega) (Z + k + 3) ks).tape := by
   -- 哑元轮的起点格局（驱动层）
   have hval : x.state.val = ((M.stutter).haltNorm).start.val := by
     rw [hxs]
@@ -245,9 +245,9 @@ theorem simObs_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
           simDrive_dummy_round q b ((M.stutter).haltNorm).step ((M.stutter).haltNorm).start
             x Z k hc0 hK hpre hx0 ks] at hstuck
         have hp0 : unpackPh (2 ^ b) 9 15
-            (passStart x x.state.val (k + 1) x.state.isLt (by omega) (Z + k + 3) ks).state.val
+            (passStart x x.state.val (k + 1) x.state.isLt (show k + 1 < 2 ^ b from by omega) (Z + k + 3) ks).state.val
             = 0 := by
-          simp only [passStart, Config.state, embS, Fin.val_mk]
+          simp only [passStart, embS, Fin.val_mk]
           rw [codeState_unpackPh q b x.state.val (k + 1) 0 0 x.state.isLt (by omega)
             (by decide) (by decide)]
         rw [hstuck] at hp0
@@ -258,9 +258,26 @@ theorem simObs_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
   have hdele := simObs_run_delegate q b ((M.stutter).haltNorm)
     (roundCostStay x Z k x.cur)
     (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)) hobs
+  -- `rw` 不会把 `(passStart …).tape` 归约成 `x.enc …`，先手动换形
+  have htp : (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)).tape
+      = x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks)) := rfl
+  rw [htp] at hdele
   rw [hstart, hdele]
-  exact simDrive_dummy_round q b ((M.stutter).haltNorm).step
-    ((M.stutter).haltNorm).start x Z k hc0 hK hpre hx0 ks
+  -- 把哑元轮的结论抬到 `Config.mk (embO …)` 包装上
+  have hl : Config.mk
+        (embO q b ((simDrive q b ((M.stutter).haltNorm).step
+          ((M.stutter).haltNorm).start).run (roundCostStay x Z k x.cur)
+          (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks))).state)
+        ((simDrive q b ((M.stutter).haltNorm).step
+          ((M.stutter).haltNorm).start).run (roundCostStay x Z k x.cur)
+          (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks))).tape
+      = Config.mk (embO q b (passStart x x.state.val (k + 1) x.state.isLt
+          (show k + 1 < 2 ^ b from by omega) (Z + k + 3) ks).state)
+        (passStart x x.state.val (k + 1) x.state.isLt
+          (show k + 1 < 2 ^ b from by omega) (Z + k + 3) ks).tape := by
+    rw [simDrive_dummy_round q b ((M.stutter).haltNorm).step
+      ((M.stutter).haltNorm).start x Z k hc0 hK hpre hx0 ks]
+  exact hl
 
 end DTM
 
