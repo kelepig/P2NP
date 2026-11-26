@@ -874,3 +874,176 @@ theorem mulChained_finish_run (a b W : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b) (hW : 
     (show 1 ≤ b * a from Nat.mul_pos (by omega) (by omega)) (mulL a b b 0 L)
     (List.replicate (W - b * a) (none : Sym) ++ R)
   simpa [mulFinish, mulR, List.replicate_zero, List.nil_append] using hrun
+
+/-! ### B 耗尽检测相位（乘法链的「继续 / 收尾」判据） -/
+
+/-- 耗尽检测机（6 状态）：从 A 最右格出发，左行跳过 A 的 `some true`、跨过 A 与 B 之间的
+    空白，读 B 的最近格——`some true` ⇒ 还有未消费格（回到 A 最右格，接受态 4）；
+    `some false` ⇒ B 已耗尽（停在 B 最近格，拒绝态 5）。
+    The exhaustion-check machine: from A's rightmost cell, walk left over A's trues, cross the
+    blank between A and B, and read B's nearest cell — `some true` means work remains (back to
+    A's rightmost cell, accept state 4); `some false` means B is exhausted (reject state 5). -/
+def mulCheck : DTM 6 where
+  step := fun s a =>
+    match s.val with
+    | 0 => (match a with
+       | some true => (⟨0, by omega⟩, some true, Dir.left)
+       | none => (⟨1, by omega⟩, none, Dir.left)
+       | some false => (⟨0, by omega⟩, some false, Dir.left))
+    | 1 => (match a with
+       | some true => (⟨2, by omega⟩, some true, Dir.right)
+       | some false => (⟨5, by omega⟩, some false, Dir.stay)
+       | none => (⟨5, by omega⟩, none, Dir.stay))
+    | 2 => (match a with
+       | none => (⟨3, by omega⟩, none, Dir.right)
+       | _ => (⟨3, by omega⟩, a, Dir.right))
+    | 3 => (match a with
+       | some true => (⟨3, by omega⟩, some true, Dir.right)
+       | none => (⟨4, by omega⟩, none, Dir.left)
+       | some false => (⟨4, by omega⟩, some false, Dir.left))
+    | _ => (s, a, Dir.stay)
+  start := 0
+  accept := 4
+  reject := 5
+
+/-- 非 4/5 状态一律不停机。 States other than 4 and 5 never halt. -/
+theorem mulCheck_halted_ne (st : Nat) (hst : st < 6) (h4 : st ≠ 4) (h5 : st ≠ 5) (t : Tape) :
+    mulCheck.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulCheck.accept.val = 4 from rfl] at hv
+    exact h4 hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulCheck.reject.val = 5 from rfl] at hv
+    exact h5 hv
+
+/-- `mulCheck` 的单步运行套路。 The one-step idiom for `mulCheck`. -/
+theorem estepMK (st : Nat) (hst : st < 6) (a : Sym) (q' : Fin 6) (s : Sym) (d : Dir)
+    (h : mulCheck.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (h4 : st ≠ 4) (h5 : st ≠ 5) :
+    mulCheck.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
+      = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
+  rw [show (1 : Nat) = 0 + 1 from rfl]
+  rw [DTM.run_succ_of_not_halted _ 0 _ (mulCheck_halted_ne st hst h4 h5 _)]
+  exact stepConfig_of_step mulCheck ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩ q' s d h
+
+/-- 状态 0 左行跳过 `m` 个 `some true`（把格写回右带、原样保留）。
+    State 0 walks left over `m` trues, writing them back unchanged. -/
+theorem mulCheck_skipA : ∀ (m : Nat) (P R : List Sym),
+    mulCheck.run m
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate m (some true) ++ P) (some true :: R)⟩
+      = ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk P (List.replicate m (some true) ++ (some true :: R))⟩
+  | 0, P, R => by
+      simp [DTM.run]
+  | m + 1, P, R => by
+      conv =>
+        lhs
+        rw [List.replicate_succ, List.cons_append]
+        rw [show m + 1 = 1 + m from by omega]
+      rw [DTM.run_add mulCheck 1 m]
+      rw [estepMK 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+      etape
+      rw [mulCheck_skipA m P (some true :: R)]
+      rw [replicate_succ_append m (some true) (some true :: R)]
+
+/-- 状态 3 右行跳过 `m` 个 `some true` 并停在空白上（`m` 步）。
+    State 3 walks right over `m` trues and stops on the blank, in `m` steps. -/
+theorem mulCheck_skipR : ∀ (m : Nat) (P R : List Sym),
+    mulCheck.run m
+      ⟨(⟨3, by omega⟩ : Fin 6),
+        Tape.mk P (List.replicate m (some true) ++ (none :: R))⟩
+      = ⟨(⟨3, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate m (some true) ++ P) (none :: R)⟩
+  | 0, P, R => by
+      simp [DTM.run]
+  | m + 1, P, R => by
+      conv =>
+        lhs
+        rw [List.replicate_succ, List.cons_append]
+        rw [show m + 1 = 1 + m from by omega]
+      rw [DTM.run_add mulCheck 1 m]
+      rw [estepMK 3 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+      etape
+      rw [mulCheck_skipR m (some true :: P) R]
+      rw [replicate_succ_append m (some true) P]
+
+/-- **检测「B 还有未消费格」**：`2a + 4` 步后回到 A 的最右格（接受态），纸带原样。
+    `2a + 4` steps back to A's rightmost cell (accept state), tape unchanged. -/
+theorem mulCheck_continue_run (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    mulCheck.run (2 * a + 4)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨4, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩ := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  -- 步数分解：(a-1) + 1(空白) + 1(跨空白) + 1(折返) + 1(跨回) + a(跳过 A) + 1(退回)
+  rw [show 2 * (a' + 1) + 4 = a' + (1 + (1 + (1 + (1 + ((a' + 1) + 1))))) from by omega]
+  -- 状态 0：左行跳过 A 的 `a'` 格（头落在 A 最左格上）
+  rw [DTM.run_add mulCheck a' (1 + (1 + (1 + (1 + ((a' + 1) + 1)))))]
+  rw [mulCheck_skipA a' (none :: (some true :: P)) (none :: R)]
+  -- 把 `replicate` 的单元提到表头，便于「读到的就是 `some true`」的字面匹配
+  rw [← cons_replicate_append (some true) a' (none :: R)]
+  -- 状态 0：再左移一步，头落在 A 与 B 之间的空白上
+  rw [DTM.run_add mulCheck 1 (1 + (1 + (1 + ((a' + 1) + 1))))]
+  rw [estepMK 0 (by omega) (some true) _ _ _ (by rfl)
+    _ _ (by omega) (by omega)]
+  etape
+  -- 状态 0：跨过空白，头落在 B 的最近格上
+  rw [DTM.run_add mulCheck 1 (1 + (1 + ((a' + 1) + 1)))]
+  rw [estepMK 0 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
+  -- 状态 1：读到 `some true` ⇒ 折返
+  rw [DTM.run_add mulCheck 1 (1 + ((a' + 1) + 1))]
+  rw [estepMK 1 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
+  -- 状态 2：跨回空白进 A 的最左格
+  rw [DTM.run_add mulCheck 1 ((a' + 1) + 1)]
+  rw [estepMK 2 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
+  -- 状态 3：右行跳过 A 的全部格，再退回最右格
+  rw [DTM.run_add mulCheck (a' + 1) 1]
+  rw [cons_replicate_append (some true) a' (none :: R)]
+  rw [replicate_succ_append a' (some true) (none :: R)]
+  rw [mulCheck_skipR (a' + 1) (none :: (some true :: P)) R]
+  rw [estepMK 3 (by omega) none _ _ _ (by rfl)
+    (List.replicate (a' + 1) (some true) ++ (none :: (some true :: P))) R
+    (by omega) (by omega)]
+  etape
+  rw [List.replicate_succ]
+  simp
+
+/-- **检测「B 已耗尽」**：`a + 2` 步后停在 B 的最近格上（拒绝态），纸带原样。
+    `a + 2` steps to B's nearest cell (reject state), tape unchanged. -/
+theorem mulCheck_done_run (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    mulCheck.run (a + 2)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨5, by omega⟩ : Fin 6),
+          Tape.mk P (some false :: (none ::
+            (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  -- 步数分解：(a-1) + 1(空白) + 1(跨空白) + 1(读到 `some false` 停机)
+  rw [show a' + 1 + 2 = a' + (1 + (1 + 1)) from by omega]
+  rw [DTM.run_add mulCheck a' (1 + (1 + 1))]
+  rw [mulCheck_skipA a' (none :: (some false :: P)) (none :: R)]
+  -- 把 `replicate` 的单元提到表头，便于「读到的就是 `some true`」的字面匹配
+  rw [← cons_replicate_append (some true) a' (none :: R)]
+  rw [DTM.run_add mulCheck 1 (1 + 1)]
+  rw [estepMK 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
+  rw [DTM.run_add mulCheck 1 1]
+  rw [estepMK 0 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
+  rw [estepMK 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+  etape
