@@ -19,6 +19,7 @@
 -/
 
 import Pnp.Classes
+import Pnp.Machine.ObsPhase
 
 namespace Pnp
 
@@ -387,6 +388,53 @@ theorem run_accept_eq_of_padLeft (M : DTM q) (k : Nat) (c1 c2 : Config q)
     (hne : ∀ j, j < k → (M.run j c1).tape.left ≠ []) :
     ((M.run k c1).state = M.accept ↔ (M.run k c2).state = M.accept) := by
   rw [run_state_eq_of_padLeft M k c1 c2 hs hP hne]
+
+end DTM
+
+
+/-! ## 运行相位机的逃逸端点（E 机逐分支读判据用） -/
+
+namespace DTM
+
+variable {q : Nat}
+
+/-- 逃生态是停机态，一旦到达就冻结在原格局。
+    The escape state halts, so once reached the configuration is frozen. -/
+theorem obsPhase_esc_persists (q b : Nat) (M : NTM q) (t : Tape) (n : Nat) :
+    (obsPhase q b M).run n ⟨obsEsc q b, t⟩ = ⟨obsEsc q b, t⟩ :=
+  run_of_halted (obsPhase q b M) _ (obsPhase_halted_esc q b M t) n
+
+/-- **失败端点**：观察机在第 `K` 步停在失败哨兵 ⇒ 运行相位机在第 `K+1` 步停在逃生态。
+    Fail endpoint: if `simObs` sits at the fail sentinel after `K` steps, `obsPhase` sits at
+    the escape state after `K + 1` steps. -/
+theorem obsPhase_esc_of_simObs_fail (q b : Nat) (M : NTM q) (K : Nat)
+    (c : Config (stateCountO q b))
+    (h : ((simObs q b M).run K c).state = obsFail q b) :
+    ((obsPhase q b M).run (K + 1) ⟨embOb q b c.state, c.tape⟩).state = obsEsc q b := by
+  rcases obsPhase_run_config_proj q b M K c with hl | ⟨hr, _⟩
+  · -- 尚未逃逸：第 `K` 步是嵌入的失败哨兵，再一步即逃逸
+    have hcfg : (obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩
+        = ⟨embOb q b (obsFail q b), ((simObs q b M).run K c).tape⟩ := by
+      rw [hl, h]
+    have hesc := obsPhase_escape_once q b M ((simObs q b M).run K c) h 0
+    have hesc' : ((obsPhase q b M).run (0 + 1)
+        ⟨embOb q b ((simObs q b M).run K c).state,
+          ((simObs q b M).run K c).tape⟩).state = obsEsc q b :=
+      congrArg Config.state hesc
+    have hesc2 : ((obsPhase q b M).run (0 + 1)
+        ⟨embOb q b (obsFail q b), ((simObs q b M).run K c).tape⟩).state = obsEsc q b := by
+      rw [← h]
+      exact hesc'
+    rw [DTM.run_add (obsPhase q b M) K 1, hcfg, hesc2]
+  · -- 已经逃逸：冻结在逃生态
+    have hstR : ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state
+        = (obsPhase q b M).reject := by
+      rw [hr]
+      rfl
+    have hhalt := halted_of_accept_or_reject (obsPhase q b M) _ (Or.inr hstR)
+    rw [DTM.run_add (obsPhase q b M) K 1,
+      run_of_halted (obsPhase q b M) _ hhalt]
+    exact hr
 
 end DTM
 
