@@ -1861,16 +1861,20 @@ theorem readWriteSeg_step_write0 (B : Nat) (L R : List Sym) :
   rw [dif_neg (by omega : ¬ B + 2 < B + 2)]
   rw [dif_pos (show True from trivial)]
 
-/-- 同符号真格串与 `cons` 的交换（用于走位段与写块段的接口对齐）。 -/
-theorem cons_replicate_append (n : Nat) (a : Sym) (R : List Sym) :
-    a :: (List.replicate n a ++ a :: R) = List.replicate n a ++ a :: (a :: R) := by
-  rw [← replicate_succ_append n a (a :: R)]
-  exact (List.cons_append (List.replicate n a) (a :: R) a).symm ▸ rfl
+/-- 同符号真格串的位移：`replicate (n+1) a ++ a :: R = replicate n a ++ a :: a :: R`。
+    用于走位段（末尾多一个真格）与写块段（块码 `false :: true^(n+2)`）的接口对齐。
+    Shifting a run of equal symbols: moving one `a` from the front to just after the run. -/
+theorem replicate_succ_cons_append (n : Nat) (a : Sym) (R : List Sym) :
+    List.replicate (n + 1) a ++ a :: R = List.replicate n a ++ a :: (a :: R) := by
+  rw [replicate_succ_append (n + 1) a R]
+  rw [replicate_succ_append n a (a :: R)]
+  rw [replicate_succ_append (n + 1) a R]
 
-/-- 计数相位的整段运行：左侧 `n` 个真格、头下再一个真格，`n + 1` 步后头停在左侧非真格上。 -/
+/-- 计数相位的整段运行：左侧 `n` 个真格、头下再一个真格，`n + 1` 步后头停在左侧非真格上。
+    Counting phase: `n + 1` steps walk left over `n + 1` true cells, leaving them on the right. -/
 theorem readWriteSeg_run_count (B : Nat) :
     ∀ (n j : Nat) (h1 : j < 2 * B + 6) (h2 : j + n + 1 < 2 * B + 6)
-      (hj : j + n + 1 ≤ B + 1) (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym),
+      (hj : j + n ≤ B + 1) (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym),
       (readWriteSeg B).run (n + 1)
         ⟨(⟨j, h1⟩ : Fin (2 * B + 6)),
           Tape.mk (List.replicate n (some true) ++ a₀ :: L) (some true :: R)⟩ =
@@ -1886,7 +1890,7 @@ theorem readWriteSeg_run_count (B : Nat) :
         (readWriteSeg_halted_false B j h1 (by omega)
           (Tape.mk (a₀ :: L) (some true :: R)))]
       rw [readWriteSeg_step_count B j h1 (by omega) a₀ L R]
-      rw [List.replicate_zero, List.nil_append]
+      rw [List.nil_append]
   | succ n ih =>
       intro j h1 h2 hj a₀ h₀ L R
       rw [show List.replicate (n + 1) (some true) ++ a₀ :: L
@@ -1901,12 +1905,18 @@ theorem readWriteSeg_run_count (B : Nat) :
       rw [readWriteSeg_step_count B j h1 (by omega) (some true)
         (List.replicate n (some true) ++ a₀ :: L) R]
       rw [ih (j + 1) (by omega) (by omega) (by omega) a₀ h₀ L (some true :: R)]
-      rw [cons_replicate_append]
-      have hst : (⟨1 + (n + 1) + j, by omega⟩ : Fin (2 * B + 6)) = ⟨j + (n + 1) + 1, h2⟩ :=
-        Fin.ext (by omega)
-      rw [show j + 1 + (n + 1) = 1 + (n + 1) + j from by omega]
+      rw [replicate_succ_cons_append n (some true) R]
+      exact congrArg
+        (fun s => (Config.mk s
+          (Tape.mk L (a₀ :: (List.replicate n (some true) ++ some true :: some true :: R))) :
+            Config (2 * B + 6)))
+        (by
+          apply Fin.ext
+          show j + 1 + n + 1 = j + (n + 1) + 1
+          omega)
 
-/-- 写块相位的整段运行：状态 `B+2+m` 起，`m + 1` 步写出 `false :: true^m`。 -/
+/-- 写块相位的整段运行：状态 `B+2+m` 起，`m + 1` 步写出块码 `false :: true^m`。
+    Write phase: from state `B+2+m` it writes `blockCode m` leftward in `m + 1` steps. -/
 theorem readWriteSeg_run_write (B : Nat) :
     ∀ (m : Nat) (hmB : m ≤ B + 2) (L₀ R₀ : List Sym), m ≤ L₀.length →
       (readWriteSeg B).run (m + 1)
@@ -1918,16 +1928,24 @@ theorem readWriteSeg_run_write (B : Nat) :
   | zero =>
       intro hmB L₀ R₀ hlen
       rw [Nat.zero_add]
+      rw [show (⟨B + 2 + 0, by omega⟩ : Fin (2 * B + 6)) = ⟨B + 2, by omega⟩ from by
+        apply Fin.ext
+        show B + 2 + 0 = B + 2
+        omega]
       rw [run_one_stp (readWriteSeg B)
-        (Config.mk (⟨B + 2 + 0, by omega⟩ : Fin (2 * B + 6)) (Tape.mk L₀ R₀))
+        (Config.mk (⟨B + 2, by omega⟩ : Fin (2 * B + 6)) (Tape.mk L₀ R₀))
         (readWriteSeg_halted_false B (B + 2) (by omega) (by omega) _)]
       rw [readWriteSeg_step_write0 B L₀ R₀]
       rw [List.drop_zero, List.replicate_zero, List.nil_append]
   | succ m ih =>
       intro hmB L₀ R₀ hlen
       cases L₀ with
-      | nil => simp at hlen
+      | nil => exact absurd hlen (by simp)
       | cons x L₁ =>
+          have hlen' : m ≤ L₁.length := by
+            have h2 : m + 1 ≤ (x :: L₁).length := hlen
+            simp only [List.length_cons] at h2
+            omega
           rw [show m + 1 + 1 = 1 + (m + 1) from by omega]
           rw [DTM.run_add (readWriteSeg B) 1 (m + 1)]
           rw [run_one_stp (readWriteSeg B)
@@ -1936,11 +1954,48 @@ theorem readWriteSeg_run_write (B : Nat) :
             (readWriteSeg_halted_false B (B + 2 + (m + 1)) (by omega) (by omega) _)]
           rw [readWriteSeg_step_write1 B (m + 1) (by omega) (by omega) x L₁ R₀]
           rw [show (⟨B + 2 + (m + 1) - 1, by omega⟩ : Fin (2 * B + 6))
-              = ⟨B + 2 + m, by omega⟩ from Fin.ext (by omega)]
-          rw [ih (by omega) L₁ (x :: some true :: R₀.tail) (by
-            simp only [List.length_cons]
-            omega)]
-          rw [List.drop_succ_cons]
+              = ⟨B + 2 + m, by omega⟩ from by
+            apply Fin.ext
+            show B + 2 + (m + 1) - 1 = B + 2 + m
+            omega]
+          rw [ih (by omega) L₁ (x :: some true :: R₀.tail) hlen']
           rw [show (x :: some true :: R₀.tail).tail = some true :: R₀.tail from rfl]
-          rw [replicate_succ_append m (some true) R₀.tail]
-          rw [show (x :: L₁).drop (m + 1) = L₁.drop m from List.drop_succ_cons x L₁ m]
+          rw [List.drop_succ_cons]
+          rw [← replicate_succ_append m (some true) R₀.tail]
+
+/-- **读段写块整段运行**：真格段 `true^(k+1)`（长度 ≤ `B`）后接非真格，机器在 `2k+5` 步内把它
+    改写成块码 `false :: true^(k+2)`（即 `blockCode k`），并停在接受态。
+    Whole-segment run: a segment of `k+1` trues is rewritten as the block code of digit `k`. -/
+theorem readWriteSeg_run (B k : Nat) (hkB : k + 1 ≤ B) (a₀ : Sym) (h₀ : a₀ ≠ some true)
+    (L R : List Sym) (hlen : k + 2 ≤ L.length) :
+    (readWriteSeg B).run (2 * k + 5)
+        ⟨(⟨0, by omega⟩ : Fin (2 * B + 6)),
+          Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: R)⟩ =
+      ⟨(⟨2 * B + 5, by omega⟩ : Fin (2 * B + 6)),
+        Tape.mk (some false :: L.drop (k + 2))
+          (List.replicate (k + 2) (some true)
+            ++ (List.replicate k (some true) ++ some true :: R))⟩ := by
+  -- 计数段 `k+1` 步 → 跳转 1 步 → 写块段 `k+3` 步
+  rw [show 2 * k + 5 = (k + 1) + (1 + (k + 3)) from by omega]
+  rw [DTM.run_add (readWriteSeg B) (k + 1) (1 + (k + 3))]
+  rw [readWriteSeg_run_count B k 0 (by omega) (by omega) (by omega) a₀ h₀ L R]
+  rw [show (⟨0 + k + 1, by omega⟩ : Fin (2 * B + 6)) = ⟨k + 1, by omega⟩ from by
+    apply Fin.ext
+    show 0 + k + 1 = k + 1
+    omega]
+  rw [DTM.run_add (readWriteSeg B) 1 (k + 3)]
+  rw [run_one_stp (readWriteSeg B)
+    (Config.mk (⟨k + 1, by omega⟩ : Fin (2 * B + 6))
+      (Tape.mk L (a₀ :: (List.replicate k (some true) ++ some true :: R))))
+    (readWriteSeg_halted_false B (k + 1) (by omega) (by omega) _)]
+  rw [readWriteSeg_step_switch B (k + 1) (by omega) (by omega) a₀ h₀ L
+    (List.replicate k (some true) ++ some true :: R)]
+  rw [show (⟨B + 2 + (k + 1 + 1), by omega⟩ : Fin (2 * B + 6))
+      = ⟨B + 2 + (k + 2), by omega⟩ from by
+    apply Fin.ext
+    show B + 2 + (k + 1 + 1) = B + 2 + (k + 2)
+    omega]
+  rw [readWriteSeg_run_write B (k + 2) (by omega) L
+    (a₀ :: (List.replicate k (some true) ++ some true :: R)) hlen]
+  rw [show (a₀ :: (List.replicate k (some true) ++ some true :: R)).tail
+      = List.replicate k (some true) ++ some true :: R from rfl]
