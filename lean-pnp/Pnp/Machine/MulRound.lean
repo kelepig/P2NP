@@ -1220,3 +1220,213 @@ theorem mulFinal_run (a d : Nat) (ha : 1 ≤ a) (hd : 1 ≤ d) (P R : List Sym) 
   -- 状态 2：遇前沿空白接受
   rw [estepMF2 2 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
   simp [Tape.write, Tape.move]
+
+/-! ### 乘法整机 `mulMachine`（轮 → 检测 → 继续 / 收尾） -/
+
+/-- 嵌入映射：轮机状态（0..17）原样进入整机。
+    Embedding of the round machine's states into the whole machine. -/
+def mulEmbR (s : Fin 18) : Fin 28 := Fin.castLE (by omega) s
+
+/-- 嵌入映射：检测机状态（0..5）→ 18..23。 -/
+def mulEmbC (s : Fin 6) : Fin 28 := ⟨18 + s.val, by have := s.isLt; omega⟩
+
+/-- 嵌入映射：收尾机状态（0..3）→ 24..27。 -/
+def mulEmbF (s : Fin 4) : Fin 28 := ⟨24 + s.val, by have := s.isLt; omega⟩
+
+/-- 乘法整机（28 状态，27 为唯一停机态）：
+    0..17 = 一轮（`mulRound`）、18..23 = 耗尽检测（`mulCheck`）、24..27 = 收尾（`mulFinal`）。
+    转移改接：`mulRound` 的接受态 17 → 检测入口 18；检测的继续态 22 → 轮起点 0；
+    检测的耗尽态 23 → 收尾入口 24。
+    The whole multiplication machine (28 states, 27 the only halting state). Round states are
+    states 0..17; the exhaustion check 18..23; the final phase 24..27. Redirects: the round's
+    accept (17) → check entry (18); the check's continue state (22) → round start (0); the
+    check's exhausted state (23) → final entry (24). -/
+def mulMachine : DTM 28 where
+  step := fun s a =>
+    if s.val = 17 then ((⟨18, by omega⟩ : Fin 28), a, Dir.stay)
+    else if s.val = 22 then ((⟨0, by omega⟩ : Fin 28), a, Dir.stay)
+    else if s.val = 23 then ((⟨24, by omega⟩ : Fin 28), a, Dir.stay)
+    else if h : s.val < 18 then
+      let r := mulRound.step ⟨s.val, h⟩ a
+      (mulEmbR r.1, r.2)
+    else if h : s.val < 24 then
+      let r := mulCheck.step ⟨s.val - 18, by omega⟩ a
+      (mulEmbC r.1, r.2)
+    else
+      let r := mulFinal.step ⟨s.val - 24, by omega⟩ a
+      (mulEmbF r.1, r.2)
+  start := 0
+  accept := 27
+  reject := 27
+
+/-- 整机在轮机状态上照抄 `mulRound`（除接受态 17 外）。
+    The whole machine mirrors `mulRound` on round states except its accept state. -/
+theorem mulMachine_step_round (s : Fin 18) (a : Sym) (hne : s ≠ mulRound.accept) :
+    mulMachine.step (mulEmbR s) a
+      = (mulEmbR (mulRound.step s a).1, (mulRound.step s a).2) := by
+  have hv : s.val ≠ 17 := by
+    intro h
+    apply hne
+    have hacc : mulRound.accept = (⟨17, by omega⟩ : Fin 18) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  simp only [mulMachine, mulEmbR, Fin.val_castLE]
+  rw [if_neg (by simpa using hv)]
+  rw [if_neg (by have := s.isLt; omega)]
+  rw [if_neg (by have := s.isLt; omega)]
+  rw [dif_pos s.isLt]
+
+/-- 整机在检测机状态上照抄 `mulCheck`（除其接受态 4 与拒绝态 5 外）。
+    The whole machine mirrors `mulCheck` on check states except 4 and 5. -/
+theorem mulMachine_step_check (s : Fin 6) (a : Sym)
+    (hne4 : s ≠ mulCheck.accept) (hne5 : s ≠ mulCheck.reject) :
+    mulMachine.step (mulEmbC s) a
+      = (mulEmbC (mulCheck.step s a).1, (mulCheck.step s a).2) := by
+  have hv4 : s.val ≠ 4 := by
+    intro h
+    apply hne4
+    have hacc : mulCheck.accept = (⟨4, by omega⟩ : Fin 6) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  have hv5 : s.val ≠ 5 := by
+    intro h
+    apply hne5
+    have hacc : mulCheck.reject = (⟨5, by omega⟩ : Fin 6) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  simp only [mulMachine, mulEmbC]
+  rw [if_neg (by omega)]
+  rw [if_neg (by omega)]
+  rw [if_neg (by omega)]
+  rw [dif_neg (by omega)]
+  rw [dif_pos (by have := s.isLt; omega)]
+  -- 内层状态 `18 + s.val - 18` 与 `s` 相等（仅数值层面不同）
+  have hs : (⟨18 + s.val - 18, by omega⟩ : Fin 6) = s :=
+    Fin.ext (by show 18 + s.val - 18 = s.val; omega)
+  rw [hs]
+
+/-- 整机在收尾机状态上照抄 `mulFinal`（除其接受态 3 外）。
+    The whole machine mirrors `mulFinal` on final states except its accept state. -/
+theorem mulMachine_step_final (s : Fin 4) (a : Sym) (hne : s ≠ mulFinal.accept) :
+    mulMachine.step (mulEmbF s) a
+      = (mulEmbF (mulFinal.step s a).1, (mulFinal.step s a).2) := by
+  have hv : s.val ≠ 3 := by
+    intro h
+    apply hne
+    have hacc : mulFinal.accept = (⟨3, by omega⟩ : Fin 4) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  simp only [mulMachine, mulEmbF]
+  rw [if_neg (by have := s.isLt; omega)]
+  rw [if_neg (by have := s.isLt; omega)]
+  rw [if_neg (by have := s.isLt; omega)]
+  rw [dif_neg (by have := s.isLt; omega)]
+  rw [dif_neg (by have := s.isLt; omega)]
+  -- 内层状态 `24 + s.val - 24` 与 `s` 相等（仅数值层面不同）
+  have hs : (⟨24 + s.val - 24, by omega⟩ : Fin 4) = s :=
+    Fin.ext (by show 24 + s.val - 24 = s.val; omega)
+  rw [hs]
+
+/-- 整机在「轮接受态 17」上的转移：进入检测入口（原地、纸带不变）。
+    Redirect from the round's accept state to the check entry. -/
+theorem mulMachine_step_17 (a : Sym) :
+    mulMachine.step (mulEmbR mulRound.accept) a
+      = ((⟨18, by omega⟩ : Fin 28), a, Dir.stay) := by
+  have hv : mulRound.accept.val = 17 := rfl
+  simp only [mulMachine, mulEmbR, Fin.val_castLE, hv]
+  simp
+
+/-- 整机在「检测继续态 22」上的转移：回到轮起点。
+    Redirect from the check's continue state back to the round start. -/
+theorem mulMachine_step_22 (a : Sym) :
+    mulMachine.step (mulEmbC mulCheck.accept) a
+      = ((⟨0, by omega⟩ : Fin 28), a, Dir.stay) := by
+  have hv : mulCheck.accept.val = 4 := rfl
+  simp only [mulMachine, mulEmbC, hv]
+  simp
+
+/-- 整机在「检测耗尽态 23」上的转移：进入收尾入口。
+    Redirect from the check's exhausted state to the final entry. -/
+theorem mulMachine_step_23 (a : Sym) :
+    mulMachine.step (mulEmbC mulCheck.reject) a
+      = ((⟨24, by omega⟩ : Fin 28), a, Dir.stay) := by
+  have hv : mulCheck.reject.val = 5 := rfl
+  simp only [mulMachine, mulEmbC, hv]
+  simp
+
+/-- 嵌入后的非终止状态在整机里也不终止（轮机侧）。 -/
+theorem mulMachine_halt_round (s : Fin 18) :
+    mulMachine.accept ≠ mulEmbR s ∧ mulMachine.reject ≠ mulEmbR s := by
+  constructor
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [mulMachine, mulEmbR, Fin.val_castLE] at hv
+    have h3 := s.isLt
+    omega
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [mulMachine, mulEmbR, Fin.val_castLE] at hv
+    have h3 := s.isLt
+    omega
+
+/-- 嵌入后的非终止状态在整机里也不终止（检测机侧）。 -/
+theorem mulMachine_halt_check (s : Fin 6) :
+    mulMachine.accept ≠ mulEmbC s ∧ mulMachine.reject ≠ mulEmbC s := by
+  constructor
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [mulMachine, mulEmbC] at hv
+    have h3 := s.isLt
+    omega
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [mulMachine, mulEmbC] at hv
+    have h3 := s.isLt
+    omega
+
+/-- 嵌入后的非终止状态在整机里也不终止（收尾机侧，须避开其接受态）。 -/
+theorem mulMachine_halt_final (s : Fin 4) (hne : s ≠ mulFinal.accept) :
+    mulMachine.accept ≠ mulEmbF s ∧ mulMachine.reject ≠ mulEmbF s := by
+  have hv : s.val ≠ 3 := by
+    intro h
+    apply hne
+    have hacc : mulFinal.accept = (⟨3, by omega⟩ : Fin 4) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  constructor
+  · intro h
+    have hv' := congrArg Fin.val h
+    simp only [mulMachine, mulEmbF] at hv'
+    omega
+  · intro h
+    have hv' := congrArg Fin.val h
+    simp only [mulMachine, mulEmbF] at hv'
+    omega
+
+/-- 整机照搬轮机的一段运行（轮机全程不停机）。
+    Whole-machine runs mirror round runs. -/
+theorem mulMachine_run_round (n : Nat) (c : Config 18)
+    (hnh : ∀ k, k < n → mulRound.halted (mulRound.run k c) = false) :
+    mulMachine.run n ⟨mulEmbR c.state, c.tape⟩ =
+      ⟨mulEmbR (mulRound.run n c).state, (mulRound.run n c).tape⟩ :=
+  run_embed mulRound mulMachine mulEmbR
+    (fun s a ha _ => mulMachine_step_round s a ha)
+    (fun s _ _ => mulMachine_halt_round s) n c hnh
+
+/-- 整机照搬检测机的一段运行（检测机全程不停机）。 -/
+theorem mulMachine_run_check (n : Nat) (c : Config 6)
+    (hnh : ∀ k, k < n → mulCheck.halted (mulCheck.run k c) = false) :
+    mulMachine.run n ⟨mulEmbC c.state, c.tape⟩ =
+      ⟨mulEmbC (mulCheck.run n c).state, (mulCheck.run n c).tape⟩ :=
+  run_embed mulCheck mulMachine mulEmbC
+    (fun s a h4 h5 => mulMachine_step_check s a h4 h5)
+    (fun s _ _ => mulMachine_halt_check s) n c hnh
+
+/-- 整机照搬收尾机的一段运行（收尾机全程不停机）。 -/
+theorem mulMachine_run_final (n : Nat) (c : Config 4)
+    (hnh : ∀ k, k < n → mulFinal.halted (mulFinal.run k c) = false) :
+    mulMachine.run n ⟨mulEmbF c.state, c.tape⟩ =
+      ⟨mulEmbF (mulFinal.run n c).state, (mulFinal.run n c).tape⟩ :=
+  run_embed mulFinal mulMachine mulEmbF
+    (fun s a ha _ => mulMachine_step_final s a ha)
+    (fun s h1 _ => mulMachine_halt_final s h1) n c hnh
