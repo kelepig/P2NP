@@ -841,7 +841,7 @@ theorem clearTrueR_run (k : Nat) (L : List Sym) (a : Sym) (ha : a ≠ some true)
     （进位，reject）。段长 `d` 满足 `d+1 < B` 时完成、`d+1 = B` 时进位。
     Single-segment increment: counts the segment, then either appends one true cell (done) or
     erases the whole segment (carry), with the two outcomes in distinct halting states. -/
-def segInc (B : Nat) : DTM (B + 4) where
+def segInc (B : Nat) : DTM (B + 7) where
   step := fun s a =>
     if h : s.val < B + 1 then
       match a with
@@ -853,14 +853,25 @@ def segInc (B : Nat) : DTM (B + 4) where
       if h3 : s.val = B + 1 then
         if a = some true then (⟨B + 1, by omega⟩, none, Dir.left)
         else (⟨B + 3, by omega⟩, a, Dir.stay)
-      else (s, a, Dir.stay)
+      else
+        if h4 : s.val = B + 3 then
+          match a with
+          | none => (⟨B + 3, by omega⟩, a, Dir.left)
+          | some true => (⟨B + 4, by omega⟩, a, Dir.left)
+          | some false => (⟨B + 6, by omega⟩, a, Dir.stay)
+        else
+          if h5 : s.val = B + 4 then
+            match a with
+            | some true => (⟨B + 4, by omega⟩, a, Dir.left)
+            | _ => ((0 : Fin (B + 7)), a, Dir.right)
+          else (s, a, Dir.stay)
   start := 0
   accept := ⟨B + 2, by omega⟩
-  reject := ⟨B + 3, by omega⟩
+  reject := ⟨B + 6, by omega⟩
 
-/-- 工作状态（≠ `B+2` 且 ≠ `B+3`）不停机。 Working states never halt. -/
-theorem segInc_halted_false (B : Nat) (st : Nat) (hst : st < B + 4)
-    (h2 : st ≠ B + 2) (h3 : st ≠ B + 3) (t : Tape) :
+/-- 工作状态（≠ `B+2` 且 ≠ `B+6`）不停机。 Working states never halt. -/
+theorem segInc_halted_false (B : Nat) (st : Nat) (hst : st < B + 7)
+    (h2 : st ≠ B + 2) (h3 : st ≠ B + 6) (t : Tape) :
     (segInc B).halted ⟨⟨st, hst⟩, t⟩ = false := by
   rw [DTM.halted, Bool.or_eq_false_iff]
   refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
@@ -870,26 +881,26 @@ theorem segInc_halted_false (B : Nat) (st : Nat) (hst : st < B + 4)
     exact h2 hv
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show (segInc B).reject.val = B + 3 from rfl] at hv
+    rw [show (segInc B).reject.val = B + 6 from rfl] at hv
     exact h3 hv
 
 /-- 计数步：读真格右移、状态加一（符号保留）。 Counting step over one true cell. -/
-theorem segInc_count_true (B st : Nat) (hs : st < B + 4) (hlt : st < B + 1)
+theorem segInc_count_true (B st : Nat) (hs : st < B + 7) (hlt : st < B + 1)
     (L R : List Sym) :
     (segInc B).stepConfig
-        (Config.mk (⟨st, hs⟩ : Fin (B + 4)) (Tape.mk L (some true :: R))) =
-      Config.mk (⟨st + 1, by omega⟩ : Fin (B + 4)) (Tape.mk (some true :: L) R) := by
+        (Config.mk (⟨st, hs⟩ : Fin (B + 7)) (Tape.mk L (some true :: R))) =
+      Config.mk (⟨st + 1, by omega⟩ : Fin (B + 7)) (Tape.mk (some true :: L) R) := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
   rw [dif_pos hlt]
 
 /-- 决策步（未满）：读到非真格时新值仍小于 `B` ⇒ 追加一个真格、右移、进完成态。
     Decision (not full): append one true cell and enter the done state. -/
-theorem segInc_decide_done (B st : Nat) (hs : st < B + 4) (hlt : st < B + 1)
+theorem segInc_decide_done (B st : Nat) (hs : st < B + 7) (hlt : st < B + 1)
     (hnew : st + 1 < B) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
     (segInc B).stepConfig
-        (Config.mk (⟨st, hs⟩ : Fin (B + 4)) (Tape.mk L (a :: R))) =
-      Config.mk (⟨B + 2, by omega⟩ : Fin (B + 4)) (Tape.mk (some true :: L) R) := by
+        (Config.mk (⟨st, hs⟩ : Fin (B + 7)) (Tape.mk L (a :: R))) =
+      Config.mk (⟨B + 2, by omega⟩ : Fin (B + 7)) (Tape.mk (some true :: L) R) := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
   cases a with
@@ -901,11 +912,11 @@ theorem segInc_decide_done (B st : Nat) (hs : st < B + 4) (hlt : st < B + 1)
 
 /-- 决策步（将满）：新值达到 `B` ⇒ 左移进清零相位（回到段内最后一个真格上）。
     Decision (full): move left into the clearing phase. -/
-theorem segInc_decide_carry (B st : Nat) (hs : st < B + 4) (hlt : st < B + 1)
+theorem segInc_decide_carry (B st : Nat) (hs : st < B + 7) (hlt : st < B + 1)
     (hnew : ¬ st + 1 < B) (x : Sym) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
     (segInc B).stepConfig
-        (Config.mk (⟨st, hs⟩ : Fin (B + 4)) (Tape.mk (x :: L) (a :: R))) =
-      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4)) (Tape.mk L (x :: a :: R)) := by
+        (Config.mk (⟨st, hs⟩ : Fin (B + 7)) (Tape.mk (x :: L) (a :: R))) =
+      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7)) (Tape.mk L (x :: a :: R)) := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
   cases a with
@@ -918,8 +929,8 @@ theorem segInc_decide_carry (B st : Nat) (hs : st < B + 4) (hlt : st < B + 1)
 /-- 清零步：清零相位读真格 ⇒ 改写空白、左移。 Clearing step: erase one true cell leftward. -/
 theorem segInc_erase_true (B : Nat) (x : Sym) (L R : List Sym) :
     (segInc B).stepConfig
-        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4)) (Tape.mk (x :: L) (some true :: R))) =
-      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4)) (Tape.mk L (x :: none :: R)) := by
+        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7)) (Tape.mk (x :: L) (some true :: R))) =
+      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7)) (Tape.mk L (x :: none :: R)) := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
   rw [dif_neg (by omega : ¬ B + 1 < B + 1)]
@@ -930,8 +941,8 @@ theorem segInc_erase_true (B : Nat) (x : Sym) (L R : List Sym) :
 /-- 清零收尾：清零相位读非真格 ⇒ 进进位态停机。 Clearing finished: enter the carry state. -/
 theorem segInc_erase_stop (B : Nat) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
     (segInc B).stepConfig
-        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4)) (Tape.mk L (a :: R))) =
-      Config.mk (⟨B + 3, by omega⟩ : Fin (B + 4)) (Tape.mk L (a :: R)) := by
+        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7)) (Tape.mk L (a :: R))) =
+      Config.mk (⟨B + 3, by omega⟩ : Fin (B + 7)) (Tape.mk L (a :: R)) := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
   rw [dif_neg (by omega : ¬ B + 1 < B + 1)]
@@ -941,11 +952,11 @@ theorem segInc_erase_stop (B : Nat) (a : Sym) (ha : a ≠ some true) (L R : List
 
 /-- 计数过程（带初值状态）：数过 `d` 个真格，状态 `j ↦ j + d`。 Counting walk with an initial state. -/
 theorem segInc_count_aux (B : Nat) :
-    ∀ (d j : Nat) (h1 : j < B + 4) (h2 : j + d < B + 4) (hj : j + d ≤ B)
+    ∀ (d j : Nat) (h1 : j < B + 7) (h2 : j + d < B + 7) (hj : j + d ≤ B)
       (L : List Sym) (a : Sym), a ≠ some true → ∀ (R : List Sym),
       (segInc B).run d
-        ⟨(⟨j, h1⟩ : Fin (B + 4)), Tape.mk L (List.replicate d (some true) ++ a :: R)⟩ =
-      ⟨(⟨j + d, h2⟩ : Fin (B + 4)),
+        ⟨(⟨j, h1⟩ : Fin (B + 7)), Tape.mk L (List.replicate d (some true) ++ a :: R)⟩ =
+      ⟨(⟨j + d, h2⟩ : Fin (B + 7)),
         Tape.mk (List.replicate d (some true) ++ L) (a :: R)⟩ := by
   intro d
   induction d with
@@ -973,9 +984,9 @@ theorem segInc_erase_run (B : Nat) :
     ∀ (n : Nat) (a₀ : Sym), a₀ ≠ some true → ∀ (L : List Sym) (a : Sym), a ≠ some true →
       ∀ (R : List Sym),
       (segInc B).run (n + 1)
-        ⟨(⟨B + 1, by omega⟩ : Fin (B + 4)),
+        ⟨(⟨B + 1, by omega⟩ : Fin (B + 7)),
           Tape.mk (List.replicate n (some true) ++ a₀ :: L) (some true :: a :: R)⟩ =
-      ⟨(⟨B + 1, by omega⟩ : Fin (B + 4)),
+      ⟨(⟨B + 1, by omega⟩ : Fin (B + 7)),
         Tape.mk L (a₀ :: List.replicate (n + 1) none ++ a :: R)⟩ := by
   intro n
   induction n with
@@ -983,7 +994,7 @@ theorem segInc_erase_run (B : Nat) :
       intro a₀ ha₀ L a ha R
       rw [List.replicate_zero, List.nil_append]
       rw [run_one_stp (segInc B)
-        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4)) (Tape.mk (a₀ :: L) (some true :: a :: R)))
+        (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7)) (Tape.mk (a₀ :: L) (some true :: a :: R)))
         (segInc_halted_false B (B + 1) (by omega) (by omega) (by omega) _)]
       rw [segInc_erase_true B a₀ L (a :: R)]
       rw [List.replicate_one]
@@ -1007,17 +1018,17 @@ theorem segInc_erase_run (B : Nat) :
     Segment increment (done): the run length goes `d ↦ d + 1`. -/
 theorem segInc_run_done (B d : Nat) (hd : d + 1 < B) (L R : List Sym) :
     (segInc B).run (d + 1)
-        ⟨(0 : Fin (B + 4)), Tape.mk L (List.replicate d (some true) ++ none :: R)⟩ =
-      ⟨(⟨B + 2, by omega⟩ : Fin (B + 4)),
+        ⟨(0 : Fin (B + 7)), Tape.mk L (List.replicate d (some true) ++ none :: R)⟩ =
+      ⟨(⟨B + 2, by omega⟩ : Fin (B + 7)),
         Tape.mk (List.replicate (d + 1) (some true) ++ L) R⟩ := by
-  have h1 : (0 : Nat) < B + 4 := by omega
-  have h2 : (0 : Nat) + d < B + 4 := by omega
-  rw [show (0 : Fin (B + 4)) = (⟨(0 : Nat), h1⟩ : Fin (B + 4)) from rfl]
+  have h1 : (0 : Nat) < B + 7 := by omega
+  have h2 : (0 : Nat) + d < B + 7 := by omega
+  rw [show (0 : Fin (B + 7)) = (⟨(0 : Nat), h1⟩ : Fin (B + 7)) from rfl]
   rw [DTM.run_add (segInc B) d 1]
   rw [segInc_count_aux B d 0 h1 h2 (by omega) L none (by simp) R]
   simp only [Nat.zero_add]
   rw [run_one_stp (segInc B)
-    (Config.mk (⟨d, by omega⟩ : Fin (B + 4))
+    (Config.mk (⟨d, by omega⟩ : Fin (B + 7))
       (Tape.mk (List.replicate d (some true) ++ L) (none :: R)))
     (segInc_halted_false B d (by omega) (by omega) (by omega) _)]
   rw [segInc_decide_done B d (by omega) (by omega) hd none (by simp)
@@ -1029,34 +1040,34 @@ theorem segInc_run_done (B d : Nat) (hd : d + 1 < B) (L R : List Sym) :
 theorem segInc_run_carry (B k : Nat) (hk : k + 2 = B) (a₀ : Sym) (ha₀ : a₀ ≠ some true)
     (L R : List Sym) :
     (segInc B).run (2 * k + 4)
-        ⟨(0 : Fin (B + 4)),
+        ⟨(0 : Fin (B + 7)),
           Tape.mk (a₀ :: L) (List.replicate (k + 1) (some true) ++ none :: R)⟩ =
-      ⟨(⟨B + 3, by omega⟩ : Fin (B + 4)),
+      ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
         Tape.mk L (a₀ :: List.replicate (k + 1) none ++ none :: R)⟩ := by
-  have h1 : (0 : Nat) < B + 4 := by omega
-  have h2 : (0 : Nat) + (k + 1) < B + 4 := by omega
+  have h1 : (0 : Nat) < B + 7 := by omega
+  have h2 : (0 : Nat) + (k + 1) < B + 7 := by omega
   -- 分四段：(k+1) 计数 + 1 决策 + (k+1) 清零 + 1 停机
   rw [show 2 * k + 4 = (k + 1) + (k + 3) from by omega]
   rw [DTM.run_add (segInc B) (k + 1) (k + 3)]
-  rw [show (0 : Fin (B + 4)) = (⟨(0 : Nat), h1⟩ : Fin (B + 4)) from rfl]
+  rw [show (0 : Fin (B + 7)) = (⟨(0 : Nat), h1⟩ : Fin (B + 7)) from rfl]
   rw [segInc_count_aux B (k + 1) 0 h1 h2 (by omega) (a₀ :: L) none (by simp) R]
   simp only [Nat.zero_add]
   rw [show k + 3 = 1 + (k + 2) from by omega]
   rw [DTM.run_add (segInc B) 1 (k + 2)]
   -- 把计数终态的 `replicate (k+1)` 重述成「一格 + 余段」的写法（定义等价）
   show (segInc B).run (k + 2)
-      ((segInc B).run 1 (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
+      ((segInc B).run 1 (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 7))
         (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R)))) =
-    ⟨(⟨B + 3, by omega⟩ : Fin (B + 4)),
+    ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
       Tape.mk L (a₀ :: List.replicate (k + 1) none ++ none :: R)⟩
   rw [run_one_stp (segInc B)
-    (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
+    (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 7))
       (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R)))
     (segInc_halted_false B (k + 1) (by omega) (by omega) (by omega) _)]
   have hstep : (segInc B).stepConfig
-      (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
+      (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 7))
         (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R))) =
-      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4))
+      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7))
         (Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: none :: R)) :=
     segInc_decide_carry B (k + 1) (by omega) (by omega) (by omega)
       (some true) none (by simp) (List.replicate k (some true) ++ a₀ :: L) R
@@ -1065,7 +1076,7 @@ theorem segInc_run_carry (B k : Nat) (hk : k + 2 = B) (a₀ : Sym) (ha₀ : a₀
   rw [DTM.run_add (segInc B) (k + 1) 1]
   rw [segInc_erase_run B k a₀ ha₀ L none (by simp) R]
   rw [run_one_stp (segInc B)
-    (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4))
+    (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 7))
       (Tape.mk L (a₀ :: List.replicate (k + 1) none ++ none :: R)))
     (segInc_halted_false B (B + 1) (by omega) (by omega) (by omega) _)]
   rw [List.cons_append]
@@ -1286,6 +1297,222 @@ theorem nextSeg_run (p k : Nat) (a : Sym) (ha : a ≠ some true) (L R : List Sym
         ++ (List.replicate p none ++ none :: R)) from by
     rw [List.cons_append]]
   rw [nextSeg_stop L (List.replicate (k + 2) (some true)
+    ++ (List.replicate p none ++ none :: R)) a ha]
+  simp only [List.replicate_succ, List.cons_append, List.append_assoc]
+
+/-! ### 进位链：segInc 的清零相位之后续走位与逐段进位 -/
+
+/-- 走位堆叠的左上下文：`r` 个「空白垫 + 满段（长度 `B-1`）」。
+    Stacked left context of `r` full segments, each preceded by `p` blank pads. -/
+def segFullL (p B : Nat) : Nat → List Sym
+  | 0 => []
+  | r + 1 => List.replicate p none ++ List.replicate (B - 1) (some true) ++ segFullL p B r
+
+/-- 每走过一段后纸带右边多出的空白记账：`r` 次进位累计 `p + B - 1` 个空白。
+    Accumulated right-side blanks after `r` carries. -/
+def chainJunk (p B : Nat) : Nat → List Sym → List Sym
+  | 0, J => J
+  | r + 1, J => List.replicate (p + B - 1) none ++ chainJunk p B r J
+
+/-- 走位相位（`B+3`）读到空白：左移一格。 Walk phase on a blank: move left. -/
+theorem segInc_walk_blank (B : Nat) (x : Sym) (L R : List Sym) :
+    (segInc B).stepConfig
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)), Tape.mk (x :: L) (none :: R)⟩ =
+      ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: none :: R)⟩ := by
+  simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  split
+  · rfl
+  · next h => exact absurd h (by omega)
+
+/-- 走位相位读到真格：进 `B+4` 并左移。 Walk phase on a true cell: enter `B+4`, move left. -/
+theorem segInc_walk_true0 (B : Nat) (x : Sym) (L R : List Sym) :
+    (segInc B).stepConfig
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)), Tape.mk (x :: L) (some true :: R)⟩ =
+      ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: some true :: R)⟩ := by
+  simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  split
+  · rfl
+  · next h => exact absurd h (by omega)
+
+/-- 走位相位读到标志格 `some false`：进溢出拒绝态。 Walk phase on the flag: overflow. -/
+theorem segInc_walk_flag (B : Nat) (L R : List Sym) :
+    (segInc B).stepConfig
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)), Tape.mk L (some false :: R)⟩ =
+      ⟨(⟨B + 6, by omega⟩ : Fin (B + 7)), Tape.mk L (some false :: R)⟩ := by
+  simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  split
+  · rfl
+  · next h => exact absurd h (by omega)
+
+/-- 走位相位 `B+4` 读到真格：左移一格。 Walk phase `B+4` on a true cell: move left. -/
+theorem segInc_walk_true1 (B : Nat) (x : Sym) (L R : List Sym) :
+    (segInc B).stepConfig
+        ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk (x :: L) (some true :: R)⟩ =
+      ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: some true :: R)⟩ := by
+  simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  split
+  · rfl
+  · next h => exact absurd h (by omega)
+
+/-- 走位相位 `B+4` 读到非真格：右移一格并**重启**（回到计数相位 0）。
+    Walk phase `B+4` on a non-true cell: step right and restart at state 0. -/
+theorem segInc_walk_stop (B : Nat) (L R : List Sym) (a : Sym) (ha : a ≠ some true) :
+    (segInc B).stepConfig
+        ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk L (a :: R)⟩ =
+      ⟨(0 : Fin (B + 7)), Tape.mk (a :: L) R⟩ := by
+  cases a with
+  | none =>
+      simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+        Tape.moveRight, List.headD, List.tail]
+      split
+      · rfl
+      · next h => exact absurd h (by omega)
+  | some b =>
+      cases b with
+      | false =>
+          simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move,
+            Tape.moveLeft, Tape.moveRight, List.headD, List.tail]
+          split
+          · rfl
+          · next h => exact absurd h (by omega)
+      | true => exact absurd rfl ha
+
+/-- 走位相位跳过 `p` 个空白垫（`p + 1` 步）。 Walk phase over `p` blank pads. -/
+theorem segInc_walk_pads (B p : Nat) :
+    ∀ (L R : List Sym) (a : Sym),
+      (segInc B).run (p + 1)
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
+          Tape.mk (List.replicate p none ++ a :: L) (none :: R)⟩ =
+      ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
+        Tape.mk L (a :: List.replicate p none ++ none :: R)⟩ := by
+  induction p with
+  | zero =>
+      intro L R a
+      simp only [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp (segInc B)
+        (Config.mk (⟨B + 3, by omega⟩ : Fin (B + 7)) (Tape.mk (a :: L) (none :: R)))
+        (segInc_halted_false B (B + 3) (by omega) (by omega) (by omega) _)]
+      rw [segInc_walk_blank B a L R]
+      rw [List.singleton_append]
+  | succ p ih =>
+      intro L R a
+      rw [show List.replicate (p + 1) none ++ a :: L
+          = none :: (List.replicate p none ++ a :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [show p + 1 + 1 = 1 + (p + 1) from by omega]
+      rw [DTM.run_add (segInc B) 1 (p + 1)]
+      rw [run_one_stp (segInc B)
+        (Config.mk (⟨B + 3, by omega⟩ : Fin (B + 7))
+          (Tape.mk (none :: (List.replicate p none ++ a :: L)) (none :: R)))
+        (segInc_halted_false B (B + 3) (by omega) (by omega) (by omega) _)]
+      rw [segInc_walk_blank B none (List.replicate p none ++ a :: L) R]
+      rw [ih L (none :: R) a]
+      rw [List.cons_append]
+      rw [replicate_succ_append p none (none :: R)]
+      rw [List.cons_append]
+
+/-- 走位相位 `B+4` 跳过 `e + 1` 个真格。 Walk phase `B+4` over `e + 1` true cells. -/
+theorem segInc_walk_trues1 (B e : Nat) :
+    ∀ (L R : List Sym) (a : Sym), a ≠ some true →
+      (segInc B).run (e + 1)
+        ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)),
+          Tape.mk (List.replicate e (some true) ++ a :: L) (some true :: R)⟩ =
+      ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)),
+        Tape.mk L (a :: List.replicate (e + 1) (some true) ++ R)⟩ := by
+  induction e with
+  | zero =>
+      intro L R a ha
+      simp only [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp (segInc B)
+        (Config.mk (⟨B + 4, by omega⟩ : Fin (B + 7)) (Tape.mk (a :: L) (some true :: R)))
+        (segInc_halted_false B (B + 4) (by omega) (by omega) (by omega) _)]
+      rw [segInc_walk_true1 B a L R]
+      rw [List.replicate_one]
+      rw [List.cons_append, List.singleton_append]
+  | succ e ih =>
+      intro L R a ha
+      rw [show List.replicate (e + 1) (some true) ++ a :: L
+          = some true :: (List.replicate e (some true) ++ a :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [show e + 1 + 1 = 1 + (e + 1) from by omega]
+      rw [DTM.run_add (segInc B) 1 (e + 1)]
+      rw [run_one_stp (segInc B)
+        (Config.mk (⟨B + 4, by omega⟩ : Fin (B + 7))
+          (Tape.mk (some true :: (List.replicate e (some true) ++ a :: L))
+            (some true :: R)))
+        (segInc_halted_false B (B + 4) (by omega) (by omega) (by omega) _)]
+      rw [segInc_walk_true1 B (some true) (List.replicate e (some true) ++ a :: L) R]
+      rw [ih L (some true :: R) a ha]
+      rw [List.cons_append]
+      rw [show 1 + (e + 1) = (e + 1) + 1 from by omega]
+      rw [replicate_succ_append (e + 1) (some true) R]
+      rw [List.cons_append]
+
+/-- 走位相位 `B+3` 跳过 `k + 2` 个真格。 Walk phase `B+3` over `k + 2` true cells. -/
+theorem segInc_walk_trues0 (B k : Nat) :
+    ∀ (L R : List Sym) (a : Sym), a ≠ some true →
+      (segInc B).run (k + 2)
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
+          Tape.mk (List.replicate (k + 1) (some true) ++ a :: L) (some true :: R)⟩ =
+      ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)),
+        Tape.mk L (a :: List.replicate (k + 2) (some true) ++ R)⟩ := by
+  intro L R a ha
+  rw [show List.replicate (k + 1) (some true) ++ a :: L
+      = some true :: (List.replicate k (some true) ++ a :: L) from by
+    rw [List.replicate_succ, List.cons_append]]
+  rw [show k + 2 = 1 + (k + 1) from by omega]
+  rw [DTM.run_add (segInc B) 1 (k + 1)]
+  rw [run_one_stp (segInc B)
+    (Config.mk (⟨B + 3, by omega⟩ : Fin (B + 7))
+      (Tape.mk (some true :: (List.replicate k (some true) ++ a :: L)) (some true :: R)))
+    (segInc_halted_false B (B + 3) (by omega) (by omega) (by omega) _)]
+  rw [segInc_walk_true0 B (some true) (List.replicate k (some true) ++ a :: L) R]
+  rw [segInc_walk_trues1 B k L (some true :: R) a ha]
+  rw [List.cons_append]
+  rw [show 1 + (k + 1) = (k + 1) + 1 from by omega]
+  rw [replicate_succ_append (k + 1) (some true) R]
+  rw [List.cons_append]
+
+/-- **走位整段**：跳过 `p` 个空白垫与长度 `k + 2` 的真格，`p + k + 4` 步后重启（状态 0）
+    在下一段最左真格上。 Full walk: `p + k + 4` steps restart at the next run's leftmost cell. -/
+theorem segInc_walk_run (B p k : Nat) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
+    (segInc B).run (p + k + 4)
+        ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)),
+          Tape.mk (List.replicate p none ++ List.replicate (k + 2) (some true) ++ a :: L)
+            (none :: R)⟩ =
+      ⟨(0 : Fin (B + 7)),
+        Tape.mk (a :: L)
+          (List.replicate (k + 2) (some true) ++ List.replicate p none ++ none :: R)⟩ := by
+  rw [show List.replicate (k + 2) (some true)
+      = some true :: List.replicate (k + 1) (some true) from by
+    rw [List.replicate_succ]]
+  rw [show (List.replicate p none
+        ++ (some true :: List.replicate (k + 1) (some true))) ++ (a :: L)
+      = List.replicate p none
+        ++ some true :: (List.replicate (k + 1) (some true) ++ a :: L) from by
+    rw [List.append_assoc, List.cons_append]]
+  rw [show p + k + 4 = (p + 1) + ((k + 2) + 1) from by omega]
+  rw [DTM.run_add (segInc B) (p + 1) ((k + 2) + 1)]
+  rw [segInc_walk_pads B p (List.replicate (k + 1) (some true) ++ a :: L) R (some true)]
+  rw [DTM.run_add (segInc B) (k + 2) 1]
+  rw [show (some true :: List.replicate p none) ++ (none :: R)
+      = some true :: (List.replicate p none ++ none :: R) from by
+    rw [List.cons_append]]
+  rw [segInc_walk_trues0 B k L (List.replicate p none ++ none :: R) a ha]
+  rw [run_one_stp (segInc B)
+    (Config.mk (⟨B + 4, by omega⟩ : Fin (B + 7))
+      (Tape.mk L (a :: List.replicate (k + 2) (some true)
+        ++ (List.replicate p none ++ none :: R))))
+    (segInc_halted_false B (B + 4) (by omega) (by omega) (by omega) _)]
+  rw [show (a :: List.replicate (k + 2) (some true)) ++ (List.replicate p none ++ none :: R)
+      = a :: (List.replicate (k + 2) (some true)
+        ++ (List.replicate p none ++ none :: R)) from by
+    rw [List.cons_append]]
+  rw [segInc_walk_stop B L (List.replicate (k + 2) (some true)
     ++ (List.replicate p none ++ none :: R)) a ha]
   simp only [List.replicate_succ, List.cons_append, List.append_assoc]
 
