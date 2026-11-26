@@ -38,10 +38,11 @@ namespace Pnp
 namespace DTM
 
 /-- **n 单位消费相位机**：0 先左移退到分隔空白；3 跨分隔进 n 块；4 跳过 `some false`
-    并把 `some true` 翻成 `some false`（状态 1）；1 右行直至值块首格（状态 5）；
-    4 遇空白进 2（耗尽）。2 = reject、5 = accept。
+    并把 `some true` 翻成 `some false`（状态 1）；1 右行直至值块首格（状态 5，相位结束，
+    **不停机**——供上位控制器改接）；4 遇空白进 2（耗尽）。accept = reject = 2（只有耗尽态停机）。
     The `n`-unit consumption phase machine: consume one `true` unit and return to the value
-    block, or halt exhausted on the n block's left-end blank. -/
+    block (state 5, not halting, so an enclosing controller can rewire it), or halt exhausted
+    at state 2. `accept = reject = 2`. -/
 def nstep : DTM 6 where
   step := fun st a =>
     match st.val with
@@ -56,7 +57,7 @@ def nstep : DTM 6 where
        | none => (⟨2, by omega⟩, none, Dir.stay))
     | _ => (st, a, Dir.stay)
   start := ⟨0, by omega⟩
-  accept := ⟨5, by omega⟩
+  accept := ⟨2, by omega⟩
   reject := ⟨2, by omega⟩
 
 /-- 同符号的「复制段 ++ 单元素」右移一格：`rep^k s ++ (s :: T) = s :: (rep^k s ++ T)`。
@@ -68,15 +69,15 @@ theorem rep_cons_shift (k : Nat) (s : Sym) (T : List Sym) :
   | succ k ih =>
       simp only [List.replicate_succ, List.cons_append, ih]
 
-/-- `nstep` 在 0–4 状态内永不停机。 The phase machine never halts while in states 0–4. -/
-theorem nstep_halted_ne (st : Nat) (hst : st < 6) (h2 : st ≠ 2) (h5 : st ≠ 5) (t : Tape) :
+/-- `nstep` 除耗尽态 2 外永不 no-op / 不停机。 The phase machine only halts at state 2. -/
+theorem nstep_halted_ne (st : Nat) (hst : st < 6) (h2 : st ≠ 2) (t : Tape) :
     nstep.halted ⟨⟨st, hst⟩, t⟩ = false := by
   rw [DTM.halted, Bool.or_eq_false_iff]
   refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show nstep.accept.val = 5 from rfl] at hv
-    exact h5 hv
+    rw [show nstep.accept.val = 2 from rfl] at hv
+    exact h2 hv
   · intro hh
     have hv := congrArg Fin.val hh
     rw [show nstep.reject.val = 2 from rfl] at hv
@@ -92,12 +93,30 @@ macro "etapeP" : tactic => `(tactic|
 /-- `nstep` 的单步套路。 The one-step idiom for `nstep`. -/
 theorem estepNP (st : Nat) (hst : st < 6) (a : Sym) (q' : Fin 6) (s : Sym) (d : Dir)
     (h : nstep.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym)
-    (h2 : st ≠ 2) (h5 : st ≠ 5) :
+    (h2 : st ≠ 2) :
     nstep.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
       = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
   rw [show (1 : Nat) = 0 + 1 from rfl]
-  rw [DTM.run_succ_of_not_halted _ 0 _ (nstep_halted_ne st hst h2 h5 _)]
+  rw [DTM.run_succ_of_not_halted _ 0 _ (nstep_halted_ne st hst h2 _)]
   exact stepConfig_of_step nstep ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩ q' s d h
+
+/-- **成功分支不停机**：若 `nstep` 某段运行的终点状态是 5（回到值块首格），
+    则该段运行全程不停机（`accept = reject = 2`，5 与它们不同）。
+    A successful segment never halts: halting is confined to state 2. -/
+theorem nstep_no_halt (n : Nat) (c : Config 6) (q : Fin 6) (t : Tape)
+    (h : nstep.run n c = ⟨q, t⟩) (hq : q.val = 5) :
+    ∀ k, k < n → nstep.halted (nstep.run k c) = false := by
+  refine halted_false_before nstep n c ?_ ?_
+  · rw [h]
+    intro hh
+    have hv : q.val = nstep.accept.val := congrArg Fin.val hh
+    have h2 : nstep.accept.val = 2 := rfl
+    omega
+  · rw [h]
+    intro hh
+    have hv : q.val = nstep.reject.val := congrArg Fin.val hh
+    have h2 : nstep.reject.val = 2 := rfl
+    omega
 
 /-- **跨分隔空白**：状态 0 与 3 各左移一格，头落到 n 块最近一格（状态 4）。
     Crossing the separator in two steps, landing on the n block's nearest cell. -/
@@ -106,10 +125,10 @@ theorem nstep_cross (x a : Sym) (Xs R : List Sym) :
       = ⟨(⟨4, by omega⟩ : Fin 6), Tape.mk Xs (x :: (none :: a :: R))⟩ := by
   rw [show (2 : Nat) = 1 + 1 from rfl, DTM.run_add nstep 1 1]
   rw [estepNP 0 (by omega) a (⟨3, by omega⟩ : Fin 6) a Dir.left
-    (by rfl) _ _ (by omega) (by omega)]
+    (by rfl) _ _ (by omega)]
   etapeP
   rw [estepNP 3 (by omega) none (⟨4, by omega⟩ : Fin 6) none Dir.left
-    (by rfl) _ _ (by omega) (by omega)]
+    (by rfl) _ _ (by omega)]
   etapeP
 
 /-- **左行跳过已消费格**：状态 4 从最近的已消费格（`some false`）出发，再左行 `k` 格越过
@@ -126,11 +145,11 @@ theorem nstep_walk_false (k r : Nat) (F W : List Sym) :
   induction k generalizing W with
   | zero =>
       rw [estepNP 4 (by omega) (some false) (⟨4, by omega⟩ : Fin 6) (some false) Dir.left
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
   | succ k ih =>
       rw [DTM.run_succ_of_not_halted nstep (k + 1) _
-        (nstep_halted_ne 4 (by omega) (by omega) (by omega) _)]
+        (nstep_halted_ne 4 (by omega) (by omega) _)]
       rw [stepConfig_of_step nstep
         ⟨(⟨4, by omega⟩ : Fin 6),
           Tape.mk (List.replicate (k + 1) (some false)
@@ -152,11 +171,11 @@ theorem nstep_walk_false_none (k : Nat) (F W : List Sym) :
   induction k generalizing W with
   | zero =>
       rw [estepNP 4 (by omega) (some false) (⟨4, by omega⟩ : Fin 6) (some false) Dir.left
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
   | succ k ih =>
       rw [DTM.run_succ_of_not_halted nstep (k + 1) _
-        (nstep_halted_ne 4 (by omega) (by omega) (by omega) _)]
+        (nstep_halted_ne 4 (by omega) (by omega) _)]
       rw [stepConfig_of_step nstep
         ⟨(⟨4, by omega⟩ : Fin 6),
           Tape.mk (List.replicate (k + 1) (some false) ++ none :: F) (some false :: W)⟩
@@ -172,7 +191,7 @@ theorem nstep_flip (L R : List Sym) :
     nstep.run 1 ⟨(⟨4, by omega⟩ : Fin 6), Tape.mk L (some true :: R)⟩
       = ⟨(⟨1, by omega⟩ : Fin 6), Tape.mk L (some false :: R)⟩ := by
   rw [estepNP 4 (by omega) (some true) (⟨1, by omega⟩ : Fin 6) (some false) Dir.stay
-    (by rfl) _ _ (by omega) (by omega)]
+    (by rfl) _ _ (by omega)]
   etapeP
 
 /-- **右行回程**：状态 1 从翻好的单元出发，右行越过 `c` 个已消费格与分隔空白，
@@ -190,20 +209,20 @@ theorem nstep_return (c : Nat) (T : List Sym) (R0' : List Sym) :
   | zero =>
       rw [DTM.run_add nstep 1 2]
       rw [estepNP 1 (by omega) (some false) (⟨1, by omega⟩ : Fin 6) (some false) Dir.right
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
       rw [DTM.run_add nstep 1 1]
       rw [estepNP 1 (by omega) none (⟨1, by omega⟩ : Fin 6) none Dir.right
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
       rw [estepNP 1 (by omega) (some true) (⟨5, by omega⟩ : Fin 6) (some true) Dir.stay
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
   | succ c ih =>
       rw [show c + 1 + 3 = 1 + (c + 3) from by omega]
       rw [DTM.run_add nstep 1 (c + 3)]
       rw [estepNP 1 (by omega) (some false) (⟨1, by omega⟩ : Fin 6) (some false) Dir.right
-        (by rfl) _ _ (by omega) (by omega)]
+        (by rfl) _ _ (by omega)]
       etapeP
       rw [ih (some false :: T)]
       rw [rep_cons_shift c (some false) (some false :: T)]
@@ -278,7 +297,7 @@ theorem nstep_exhaust_zero (m : Nat) (F R : List Sym) :
   rw [DTM.run_add nstep 2 1]
   rw [nstep_cross none (some true) F (List.replicate m (some true) ++ (none :: R))]
   rw [estepNP 4 (by omega) none (⟨2, by omega⟩ : Fin 6) none Dir.stay
-    (by rfl) _ _ (by omega) (by omega)]
+    (by rfl) _ _ (by omega)]
   etapeP
 
 /-- **耗尽（已有已消费格）**：头下（最近）一个是已消费 `some false`，其左再 `c` 个已消费格，
@@ -301,7 +320,7 @@ theorem nstep_exhaust_pos (c m : Nat) (F R : List Sym) :
   rw [nstep_walk_false_none c F
     (none :: (some true :: (List.replicate m (some true) ++ (none :: R))))]
   rw [estepNP 4 (by omega) none (⟨2, by omega⟩ : Fin 6) none Dir.stay
-    (by rfl) _ _ (by omega) (by omega)]
+    (by rfl) _ _ (by omega)]
   etapeP
 
 end DTM
