@@ -17,6 +17,7 @@
 import Pnp.Machine.WriteStr
 import Pnp.Machine.Double
 import Pnp.Machine.Restore
+import Pnp.Machine.RegionBuild
 
 namespace Pnp
 
@@ -134,6 +135,71 @@ theorem unary_double_restore (m : Nat) :
   rw [show m + m + 1 = (unaryF m ++ unaryF m).length + 1 from by rw [hlen]]
   rw [restoreTrue_run' [none] (unaryF m ++ unaryF m) hne]
   simp only [unaryF_map_true, unary_reverse]
+
+/-- **带尾空白的倍增循环**（至少一个源格）：块末尾多一个空白时，第一轮把它当作新副本
+    消耗掉，其余各轮沿用 `double_loop`。结论与 `double_loop` 相同（右对齐、无尾空白）。
+    The doubling loop when the block carries one trailing blank (at least one source cell):
+    the first round consumes it as the new copy mark, `double_loop` handles the rest. -/
+theorem double_loop_trailing (r k : Nat) :
+    doubleStep.run (doubleLoopSteps (r + 1) k)
+      { state := (0 : Fin 4),
+        tape := { left := [none],
+                  right := List.replicate k (some false) ++
+                           List.replicate (r + 1) (some true) ++
+                           List.replicate k (some false) ++ [none] } } =
+    { state := (0 : Fin 4),
+      tape := { left := [none],
+                right := List.replicate (k + (r + 1)) (some false) ++
+                         List.replicate (k + (r + 1)) (some false) } } := by
+  -- 把输入改写成 `double_iter` 的入口形状（尾空白留在 `e` 位）
+  have hshape : List.replicate k (some false) ++ List.replicate (r + 1) (some true) ++
+      List.replicate k (some false) ++ [none] =
+      List.replicate k (some false) ++ some true ::
+        (List.replicate r (some true) ++ List.replicate k (some false) ++ [none]) := by
+    simp only [List.replicate_succ', List.append_assoc, List.cons_append,
+      List.nil_append]
+    rw [cons_replicate_append]
+  rw [hshape]
+  rw [show doubleLoopSteps (r + 1) k = doubleIterSteps r k + doubleLoopSteps r (k + 1)
+    from rfl]
+  -- 第一轮吃掉尾空白；其后各轮无尾空白，回到 `double_loop`
+  rw [DTM.run_add, double_iter r k [none] (Or.inr rfl), double_loop r (k + 1)]
+  simp [Nat.add_comm, Nat.add_left_comm]
+
+/-- `unary` 形态的带尾空白倍增循环（`m ≥ 1`，即块里至少一个源格）。
+    Unary form of the trailing-blank doubling loop, for a nonempty counter. -/
+theorem unary_double_trailing (m : Nat) (hm : 1 ≤ m) :
+    doubleStep.run (doubleLoopSteps m 0)
+      ⟨(0 : Fin 4), Tape.mk [none] (unary m ++ [none])⟩
+      = ⟨(0 : Fin 4), Tape.mk [none] (unaryF m ++ unaryF m)⟩ := by
+  obtain ⟨r, rfl⟩ : ∃ r, m = r + 1 := ⟨m - 1, by omega⟩
+  simpa only [unary, unaryF, Nat.zero_add, List.replicate_zero, List.nil_append,
+    List.append_nil] using double_loop_trailing r 0
+
+/-- **完整的 unary 倍增规格（三段）**：`⟨block + 尾空白⟩` 经「倍增循环 → 恢复 → 左移归位」
+    得到「头在块首、块右侧带尾空白」的纸带，计数翻倍为 `unary (2m)`（终态为恢复机的接受态 2）。
+    The full three-stage unary doubling spec: loop, restore, and walking back to the block
+    start — the counter comes out doubled as `unary (2m)` (end state 2 = restore's accept). -/
+theorem unary_dbl_spec (m : Nat) (hm : 1 ≤ m) :
+    moveLeftN (m + m)
+      ((restoreTrue.run (m + m + 1)
+        ⟨(0 : Fin 4),
+          ((doubleStep.run (doubleLoopSteps m 0)
+            ⟨(0 : Fin 4), Tape.mk [none] (unary m ++ [none])⟩).tape)⟩).tape)
+      = Tape.mk [none] (unary (m + m) ++ [none]) := by
+  -- ① 倍增循环
+  have h1 : (doubleStep.run (doubleLoopSteps m 0)
+      ⟨(0 : Fin 4), Tape.mk [none] (unary m ++ [none])⟩).tape
+      = Tape.mk [none] (unaryF m ++ unaryF m) := by
+    rw [unary_double_trailing m hm]
+  rw [h1]
+  -- ② 恢复
+  rw [unary_double_restore m]
+  -- ③ 左移归位（`moveLeftN_append` + unary 自逆）
+  rw [moveLeftN_append (m + m) (unary (m + m)) [none] [none]
+    (by simp [unary_length])]
+  -- `take`/`drop` 取满整串：展开成 `replicate` 交给 `take_replicate`/`drop_replicate`
+  simp [unary, unary_reverse]
 
 end DTM
 
