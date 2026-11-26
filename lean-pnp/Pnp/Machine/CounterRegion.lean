@@ -499,6 +499,76 @@ theorem skipBlankL_run : ∀ (m : Nat) (a : Sym) (ha : a ≠ none) (L R : List S
 
 /-! ### unary 减一 -/
 
+/-- **抹格机**：右行把接下来的 `n` 格逐格改写成空白，状态值 = 已抹格数。
+    用于组循环里「擦掉旧段的真格」，使写出的块 `0 1^(k+2)` 两侧都是空白。
+    Blanker: blanks the next `n` cells while walking right. -/
+def eraseCells (n : Nat) : DTM (n + 1) where
+  step := fun s a =>
+    if h : s.val < n then (⟨s.val + 1, by omega⟩, none, Dir.right)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := ⟨n, by omega⟩
+  reject := ⟨n, by omega⟩
+
+/-- 未抹满 `n` 格时不停机。 Never halts before `n` cells are blanked. -/
+theorem eraseCells_halted_lt (n st : Nat) (hst : st < n + 1) (h : st < n) (t : Tape) :
+    (eraseCells n).halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv : st = n := by
+      have h2 := congrArg Fin.val hh
+      simpa only [eraseCells] using h2
+    omega
+  · intro hh
+    have hv : st = n := by
+      have h2 := congrArg Fin.val hh
+      simpa only [eraseCells] using h2
+    omega
+
+/-- 抹一格：把当前格改写成空白并右移。 Blank the head cell and move right. -/
+theorem eraseCells_step (n st : Nat) (hst : st < n + 1) (h : st < n)
+    (L R : List Sym) :
+    (eraseCells n).stepConfig ⟨(⟨st, hst⟩ : Fin (n + 1)), Tape.mk L R⟩ =
+      ⟨(⟨st + 1, by omega⟩ : Fin (n + 1)), Tape.mk (none :: L) R.tail⟩ := by
+  simp only [DTM.stepConfig, eraseCells, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rw [dif_pos h]
+
+/-- **抹格整段**：`i ≤ n` 步把接下来的 `i` 格抹成空白、头右移 `i` 格。
+    Whole run: `i` cells blanked and the head moved `i` cells right. -/
+theorem eraseCells_run (n : Nat) :
+    ∀ (i : Nat) (hi : i ≤ n) (t : Tape),
+      (eraseCells n).run i ⟨(⟨0, by omega⟩ : Fin (n + 1)), t⟩ =
+        ⟨(⟨i, by omega⟩ : Fin (n + 1)),
+          Tape.mk (List.replicate i none ++ t.left) (t.right.drop i)⟩
+  | 0, _, t => by
+      show (eraseCells n).run 0 ⟨(⟨0, by omega⟩ : Fin (n + 1)), t⟩ = _
+      rw [show t = Tape.mk t.left t.right from rfl]
+      rfl
+  | i + 1, hi, t => by
+      -- 前 `i` 步 + 最后一步
+      have hi' : i ≤ n := by omega
+      have ht : (⟨i, by omega⟩ : Fin (n + 1)) = (⟨i, by omega⟩ : Fin (n + 1)) := rfl
+      have hstep : (eraseCells n).run 1
+            ⟨(⟨i, by omega⟩ : Fin (n + 1)),
+              Tape.mk (List.replicate i none ++ t.left) (t.right.drop i)⟩ =
+          (eraseCells n).stepConfig
+            ⟨(⟨i, by omega⟩ : Fin (n + 1)),
+              Tape.mk (List.replicate i none ++ t.left) (t.right.drop i)⟩ :=
+        run_one_stp _ _ (eraseCells_halted_lt n i (by omega) (by omega) _)
+      have hsplit : (eraseCells n).run (i + 1) ⟨(⟨0, by omega⟩ : Fin (n + 1)), t⟩ =
+          (eraseCells n).run 1
+            ((eraseCells n).run i ⟨(⟨0, by omega⟩ : Fin (n + 1)), t⟩) := by
+        rw [DTM.run_add]
+      rw [hsplit, eraseCells_run n i hi' t, hstep]
+      rw [eraseCells_step n i (by omega) (by omega)
+        (List.replicate i none ++ t.left) (t.right.drop i)]
+      rw [List.tail_drop]
+      rw [show none :: (List.replicate i none ++ t.left)
+          = List.replicate (i + 1) none ++ t.left from by
+        rw [List.replicate_succ, List.cons_append]]
+
 /-- **unary 减一**：头停在真格串右侧空白上时，左移一格再把它擦成空白；2 步停机。
     Unary decrement: move left onto the last true cell, erase it, halt (2 steps). -/
 def shrinkTrue : DTM 3 where
