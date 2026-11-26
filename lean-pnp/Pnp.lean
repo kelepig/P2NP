@@ -142,6 +142,8 @@ import Pnp.Machine.BranchIndex
 import Pnp.Machine.DigitBack
 import Pnp.Machine.DigitGrow
 import Pnp.Machine.DigitInc
+import Pnp.Machine.DigitRound
+import Pnp.Machine.DigitChain
 import Pnp.Machine.DigitShape
 import Pnp.Machine.PadConflict
 import Pnp.Machine.ExpandInitTwo
