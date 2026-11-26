@@ -427,7 +427,7 @@ theorem scanBackL_run : ∀ (blocks : List Sym), (∀ x ∈ blocks, x ≠ none) 
 /-! ### 组消费：把最近至多 B 个真格翻成空白（计数值进状态） -/
 
 /-- **组消费机**：从边界真格起左行，把真格逐个翻成空白，至多 `B` 个；状态值即已翻个数。
-    读到非真格或已满 `B` 后原地吸收（后续步数不改变格局），故可整段拼接。
+    读到非真格或已满 `B` 后原地吸收（后续步数不改变格局），故可作为相位串接。
     Group consumer: flip up to `B` true cells to blanks walking left; the state value is the
     number flipped; afterwards the configuration is a fixed point. -/
 def consumeTrue (B : Nat) : DTM (B + 2) where
@@ -455,76 +455,87 @@ theorem consumeTrue_halted_false (B : Nat) (st : Nat) (hst : st < B + 2) (h : st
     rw [show (consumeTrue B).reject.val = B + 1 from rfl] at hv
     exact h hv
 
-/-- 读真格且未满：翻成空白、左移一格。 Flip one true cell and move left. -/
-theorem consumeTrue_step_true (B : Nat) (st : Nat) (hst : st < B + 2) (hval : st < B)
+/-- 单步（读真格且未满）：翻成空白、左移一格。 One true cell flipped to blank, move left. -/
+theorem consumeTrue_step_true (B st : Nat) (hs : st < B + 2) (hval : st < B)
     (x : Sym) (L R : List Sym) :
-    (consumeTrue B).stepConfig ⟨⟨st, hst⟩, Tape.mk (x :: L) (some true :: R)⟩ =
-      ⟨⟨st + 1, by omega⟩, Tape.mk L (x :: none :: R)⟩ :=
-  stepConfig_of_lit (consumeTrue B) ⟨st, hst⟩ (some true) (x :: L) R
-    ⟨st + 1, by omega⟩ none Dir.left (Tape.mk L (x :: none :: R))
-    (by
-      simp only [consumeTrue]
-      rw [dif_pos hval])
-    (by rfl)
+    (consumeTrue B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk (x :: L) (some true :: R))) =
+      Config.mk (⟨st + 1, by omega⟩ : Fin (B + 2)) (Tape.mk L (x :: none :: R)) := by
+  simp only [DTM.stepConfig, consumeTrue, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rw [dif_pos hval]
 
-/-- 读非真格（或已满 `B`）：原地吸收。 On a non-true (or when full): fixed point. -/
-theorem consumeTrue_step_stuck (B : Nat) (st : Nat) (hst : st < B + 2) (a : Sym)
+/-- 单步（读非真格或已满 `B`）：原地吸收。 A non-true cell (or full): fixed point. -/
+theorem consumeTrue_step_stuck (B st : Nat) (hs : st < B + 2) (a : Sym)
     (ha : a ≠ some true) (L R : List Sym) :
-    (consumeTrue B).stepConfig ⟨⟨st, hst⟩, Tape.mk L (a :: R)⟩ =
-      ⟨⟨st, hst⟩, Tape.mk L (a :: R)⟩ := by
-  refine stepConfig_of_lit (consumeTrue B) ⟨st, hst⟩ a L R ⟨st, hst⟩ a Dir.stay
-    (Tape.mk L (a :: R)) ?_ (by rfl)
-  simp only [consumeTrue]
-  by_cases hB : st < B
-  · rw [dif_pos hB]
-    cases a with
-    | none => rfl
-    | some b => cases b with
-      | false => rfl
+    (consumeTrue B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk L (a :: R))) =
+      Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk L (a :: R)) := by
+  simp only [DTM.stepConfig, consumeTrue, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  cases a with
+  | none => split <;> rfl
+  | some b =>
+      cases b with
+      | false => split <;> rfl
       | true => exact absurd rfl ha
-  · rw [dif_neg hB]
 
 /-- **组消费整段（带初值状态）**：从状态 `j`（已翻 `j` 个）起把 `k + 1` 个真格翻成空白，
     `k + 1` 步后状态为 `j + k + 1`，头停在紧随其后的非真格 `a₀` 上。
     Consumer run with an initial state: flip `k + 1` more true cells. -/
-theorem consumeTrue_run_aux (B : Nat) : ∀ (k j : Nat), j + k + 1 ≤ B →
-    ∀ (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym),
+theorem consumeTrue_run_aux (B : Nat) :
+    ∀ (k j : Nat) (h1 : j < B + 2) (h2 : j + k + 1 < B + 2) (hj : j + k + 1 ≤ B)
+      (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym),
       (consumeTrue B).run (k + 1)
-        ⟨(⟨j, by omega⟩ : Fin (B + 2)),
+        ⟨(⟨j, h1⟩ : Fin (B + 2)),
           Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: R)⟩ =
-        ⟨(⟨j + k + 1, by omega⟩ : Fin (B + 2)),
-          Tape.mk L (a₀ :: List.replicate (k + 1) none ++ R)⟩
-  | 0, j, hj, a₀, h₀, L, R => by
-      rw [List.replicate_zero, List.nil_append]
-      rw [show (0 + 1 : Nat) = 0 + 1 from rfl]
-      rw [run_one_stp _ _ (consumeTrue_halted_false B j (by omega) (by omega))]
-      rw [consumeTrue_step_true B j (by omega) (by omega) a₀ L R]
-      rw [show j + 0 + 1 = j + 1 from by omega]
+        ⟨(⟨j + k + 1, h2⟩ : Fin (B + 2)),
+          Tape.mk L (a₀ :: List.replicate (k + 1) none ++ R)⟩ := by
+  intro k
+  induction k with
+  | zero =>
+      intro j h1 h2 hj a₀ h₀ L R
+      rw [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp (consumeTrue B)
+        (Config.mk (⟨j, h1⟩ : Fin (B + 2)) (Tape.mk (a₀ :: L) (some true :: R)))
+        (consumeTrue_halted_false B j h1 (by omega) (Tape.mk (a₀ :: L) (some true :: R)))]
+      rw [consumeTrue_step_true B j h1 (by omega) a₀ L R]
+      rw [List.replicate_one]
       rfl
-  | k + 1, j, hj, a₀, h₀, L, R => by
+  | succ k ih =>
+      intro j h1 h2 hj a₀ h₀ L R
       rw [show List.replicate (k + 1) (some true) ++ a₀ :: L
             = some true :: (List.replicate k (some true) ++ a₀ :: L) from by
         rw [List.replicate_succ, List.cons_append]]
-      rw [show (k + 1 + 1 : Nat) = 1 + (k + 1) from by omega]
+      rw [show (k + 1) + 1 = 1 + (k + 1) from by omega]
       rw [DTM.run_add (consumeTrue B) 1 (k + 1)]
-      rw [run_one_stp _ _ (consumeTrue_halted_false B j (by omega) (by omega))]
-      rw [consumeTrue_step_true B j (by omega) (by omega) (some true)
+      rw [run_one_stp (consumeTrue B)
+        (Config.mk (⟨j, h1⟩ : Fin (B + 2))
+          (Tape.mk (some true :: (List.replicate k (some true) ++ a₀ :: L)) (some true :: R)))
+        (consumeTrue_halted_false B j h1 (by omega)
+          (Tape.mk (some true :: (List.replicate k (some true) ++ a₀ :: L)) (some true :: R)))]
+      rw [consumeTrue_step_true B j h1 (by omega) (some true)
         (List.replicate k (some true) ++ a₀ :: L) R]
-      rw [consumeTrue_run_aux B k (j + 1) (by omega) a₀ h₀ L (none :: R)]
-      rw [show j + 1 + k + 1 = j + (k + 1) + 1 from by omega]
-      rw [replicate_succ]
+      rw [ih (j + 1) (by omega) (by omega) (by omega) a₀ h₀ L (none :: R)]
+      rw [show 1 + (k + 1) = (k + 1) + 1 from by omega]
+      rw [List.cons_append, replicate_succ_append]
+      have hst : (j + 1) + k + 1 = j + (k + 1) + 1 := by omega
+      simp only [hst]
+      rfl
 
 /-- **组消费整段**：从状态 0 起把 `k + 1` 个真格翻成空白，头停在非真格 `a₀` 上。
     Consumer run from the start state. -/
-theorem consumeTrue_run (B : Nat) (k : Nat) (hk : k + 1 ≤ B)
-    (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym) :
+theorem consumeTrue_run (B k : Nat) (hk : k + 1 ≤ B) (a₀ : Sym) (h₀ : a₀ ≠ some true)
+    (L R : List Sym) :
     (consumeTrue B).run (k + 1)
       ⟨(0 : Fin (B + 2)),
         Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: R)⟩ =
       ⟨(⟨k + 1, by omega⟩ : Fin (B + 2)),
         Tape.mk L (a₀ :: List.replicate (k + 1) none ++ R)⟩ := by
-  have h := consumeTrue_run_aux B k 0 (by omega) a₀ h₀ L R
-  rw [show (0 + k + 1) = k + 1 from by omega] at h
+  have h1 : (0 : Nat) < B + 2 := by omega
+  have h2 : (0 : Nat) + k + 1 < B + 2 := by omega
+  have h := consumeTrue_run_aux B k 0 h1 h2 (by omega) a₀ h₀ L R
+  simp only [Nat.zero_add] at h
   exact h
 
 end DTM
