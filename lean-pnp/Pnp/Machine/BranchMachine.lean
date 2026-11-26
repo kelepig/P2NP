@@ -174,7 +174,7 @@ theorem branchMachine_dummy_complete {q : Nat} (M : NTM q) (w : List Bool) (a : 
     {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
     (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z m : Nat) (hm : 1 ≤ m)
     (hZT : Z ≤ T + 1) (R : List Sym)
-    (hd1 : T ≤ m) (hpre : m ≤ T + 1)
+    (hd1 : T ≤ m)
     (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
     (hpad : roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
         + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1
@@ -207,7 +207,7 @@ theorem branchMachine_dummy_complete {q : Nat} (M : NTM q) (w : List Bool) (a : 
   -- 完备性（#258）
   obtain ⟨t, i, ht1, htT, hi, hhit⟩ :=
     exists_branch_dummy_hit_uniform M hB hBpos w T b hbnd hT Z (Reg.initReg M.start w m m)
-      hxM hxw hd1' hd2' hxacc hxre rfl (by rw [Reg.initReg_pre_length]; exact hpre) hZT hacc
+      hxM hxw hd1' hd2' hxacc hxre rfl hZT hacc
   refine ⟨t, i, ht1, htT, hi, ?_⟩
   -- 命中 ⇒ 运行相位机在预算末态接受
   have hK : ((obsPhase q b ((M.stutter).haltNorm)).run
@@ -262,7 +262,7 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
     (hlB : ∀ m a', ((M.stutter).step m a').length ≤ B + 1)
     (T b t i : Nat) (hT : 0 < T) (hbnd : B + 2 < 2 ^ b)
     (Z m : Nat) (hm : 1 ≤ m) (hZT : Z ≤ T + 1) (R : List Sym)
-    (hd1 : T ≤ m) (hpre : m ≤ T + 1)
+    (hd1 : T ≤ m)
     (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
     (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
     (hpadpost : (branchBlocks B T i).length + 1

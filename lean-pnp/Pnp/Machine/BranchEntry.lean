@@ -493,7 +493,7 @@ theorem exists_branch_dummy_hit_of_acceptsWithin_poly {q : Nat} (M : NTM q) {B :
     (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
     (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
     (hxm : x.state = M.start)
-    (hpre : x.pre.length ≤ T + 1) (hZ : Z ≤ T + 1)
+    (hZ : Z ≤ T + 1)
     (hacc : M.AcceptsWithin w T) :
     ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
       ((simObs q b ((M.stutter).haltNorm)).run
@@ -601,7 +601,7 @@ theorem exists_branch_dummy_hit_uniform {q : Nat} (M : NTM q) {B : Nat}
     (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
     (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
     (hxm : x.state = M.start)
-    (hpre : x.pre.length ≤ T + 1) (hZ : Z ≤ T + 1)
+    (hZ : Z ≤ T + 1)
     (hacc : M.AcceptsWithin w T) :
     ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
       ((simObs q b ((M.stutter).haltNorm)).run
@@ -612,7 +612,7 @@ theorem exists_branch_dummy_hit_uniform {q : Nat} (M : NTM q) {B : Nat}
         = obsAcc q b := by
   obtain ⟨t, i, ht1, htT, hi, hhit⟩ :=
     exists_branch_dummy_hit_of_acceptsWithin_poly M hB hBpos w T b hbnd hT Z x hx hxw
-      hd1 hd2 hxacc hxre hxm hpre hZ hacc
+      hd1 hd2 hxacc hxre hxm hZ hacc
   refine ⟨t, i, ht1, htT, hi, ?_⟩
   refine simObs_run_accept_at_budget q b ((M.stutter).haltNorm) _ _ _ ?_ hhit
   unfold branchBudget
