@@ -208,6 +208,223 @@ theorem skipNonBlankR_run : ∀ (xs : List Sym), (∀ x ∈ xs, x ≠ none) →
       rw [List.reverse_cons, List.append_assoc]
       rfl
 
+/-! ### 右行找段机 -/
+
+/-- **右行找段机**：从段间空白垫起右行，跨过垫与整段真格，落在该段**最右真格**上并接受
+    （正是 `readWriteSeg` 所需的入口格：头下为真格、左侧为同段其余真格、再左为空白垫）。
+    相位：0 跳空白垫、1 跳真格串（读到空白则左移一格进接受态 2）。
+    Rightward segment finder: from a pad cell, cross the pad and the whole segment and stop on
+    the segment's rightmost true cell (the entry cell of `readWriteSeg`). -/
+def seekSegR : DTM 3 where
+  step := fun s a =>
+    if s.val = 0 then
+      match a with
+      | none => ((0 : Fin 3), a, Dir.right)
+      | _ => ((1 : Fin 3), a, Dir.right)
+    else if s.val = 1 then
+      match a with
+      | none => ((2 : Fin 3), a, Dir.left)
+      | _ => ((1 : Fin 3), a, Dir.right)
+    else ((2 : Fin 3), a, Dir.stay)
+  start := 0
+  accept := 2
+  reject := 2
+
+/-- 起始态处的格局不停机。 A start-state configuration never halts. -/
+theorem seekSegR_halted_start (L R : List Sym) :
+    seekSegR.halted ⟨(0 : Fin 3), Tape.mk L R⟩ = false := by
+  show (((0 : Fin 3) == (⟨2, by omega⟩ : Fin 3))
+      || ((0 : Fin 3) == (⟨2, by omega⟩ : Fin 3))) = false
+  decide
+
+/-- 相位 0/1 不停机。 Phases 0 and 1 never halt. -/
+theorem seekSegR_halted_ne (st : Nat) (hst : st < 3) (h1 : st ≠ 2) (t : Tape) :
+    seekSegR.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show seekSegR.accept.val = 2 from rfl] at hv
+    exact h1 hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show seekSegR.reject.val = 2 from rfl] at hv
+    exact h1 hv
+
+/-- 相位 0 读空白垫：右移一格。 Phase 0 on a pad: move right. -/
+theorem seekSegR_step_pad (L R : List Sym) :
+    seekSegR.stepConfig ⟨(0 : Fin 3), Tape.mk L (none :: R)⟩ =
+      ⟨(0 : Fin 3), Tape.mk (none :: L) R⟩ :=
+  stepConfig_of_lit seekSegR (0 : Fin 3) none L R (0 : Fin 3) none Dir.right
+    (Tape.mk (none :: L) R)
+    (by
+      simp only [seekSegR]
+      rw [if_pos (show (0 : Fin 3).val = 0 from rfl)])
+    (by rfl)
+
+/-- 相位 0 读非空白：进相位 1 并右移。 Phase 0 on a non-blank: enter phase 1, move right. -/
+theorem seekSegR_step_enter (L : List Sym) (a : Sym) (R : List Sym) (ha : a ≠ none) :
+    seekSegR.stepConfig ⟨(0 : Fin 3), Tape.mk L (a :: R)⟩ =
+      ⟨(1 : Fin 3), Tape.mk (a :: L) R⟩ := by
+  cases a with
+  | none => exact absurd rfl ha
+  | some b =>
+      exact stepConfig_of_lit seekSegR (0 : Fin 3) (some b) L R (1 : Fin 3) (some b) Dir.right
+        (Tape.mk (some b :: L) R)
+        (by
+          simp only [seekSegR]
+          rw [if_pos (show (0 : Fin 3).val = 0 from rfl)])
+        (by rfl)
+
+/-- 相位 1 读真格：右移一格。 Phase 1 on a true cell: move right. -/
+theorem seekSegR_step_walk (L : List Sym) (R : List Sym) :
+    seekSegR.stepConfig ⟨(1 : Fin 3), Tape.mk L (some true :: R)⟩ =
+      ⟨(1 : Fin 3), Tape.mk (some true :: L) R⟩ :=
+  stepConfig_of_lit seekSegR (1 : Fin 3) (some true) L R (1 : Fin 3) (some true) Dir.right
+    (Tape.mk (some true :: L) R)
+    (by
+      simp only [seekSegR]
+      rw [if_neg (show ¬ ((1 : Fin 3).val = 0) from by decide)]
+      rw [if_pos (show (1 : Fin 3).val = 1 from rfl)])
+    (by rfl)
+
+/-- 相位 1 读空白：左移一格回到段末真格并接受。 Phase 1 on the blank after the segment:
+    step back left onto the segment's last true cell and halt. -/
+theorem seekSegR_step_leave (x : Sym) (L : List Sym) (R : List Sym) :
+    seekSegR.stepConfig ⟨(1 : Fin 3), Tape.mk (x :: L) (none :: R)⟩ =
+      ⟨(2 : Fin 3), Tape.mk L (x :: none :: R)⟩ :=
+  stepConfig_of_lit seekSegR (1 : Fin 3) none (x :: L) R (2 : Fin 3) none Dir.left
+    (Tape.mk L (x :: none :: R))
+    (by
+      simp only [seekSegR]
+      rw [if_neg (show ¬ ((1 : Fin 3).val = 0) from by decide)]
+      rw [if_pos (show (1 : Fin 3).val = 1 from rfl)])
+    (by rfl)
+
+/-- 相位 1 走过 `q` 个真格：`q` 步后头停在其后的空白上。 Phase 1 walking over `q` trues. -/
+theorem seekSegR_walk : ∀ (q : Nat) (L R : List Sym),
+    seekSegR.run q
+        ⟨(1 : Fin 3), Tape.mk L (List.replicate q (some true) ++ none :: R)⟩ =
+      ⟨(1 : Fin 3), Tape.mk (List.replicate q (some true) ++ L) (none :: R)⟩
+  | 0, L, R => by
+      show seekSegR.run 0 ⟨(1 : Fin 3), Tape.mk L ([] ++ none :: R)⟩ = _
+      rw [List.nil_append]
+      rfl
+  | q + 1, L, R => by
+      show seekSegR.run (q + 1)
+          ⟨(1 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ =
+        ⟨(1 : Fin 3), Tape.mk (List.replicate (q + 1) (some true) ++ L) (none :: R)⟩
+      have hrun : seekSegR.run (q + 1)
+            ⟨(1 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ =
+          seekSegR.run q (seekSegR.stepConfig
+            ⟨(1 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩) :=
+        DTM.run_succ_of_not_halted seekSegR q _
+          (seekSegR_halted_ne 1 (by omega) (by decide) _)
+      rw [hrun]
+      rw [seekSegR_step_walk L (List.replicate q (some true) ++ none :: R)]
+      rw [seekSegR_walk q (some true :: L) R]
+      rw [replicate_succ_append q (some true) L]
+
+/-- 相位 0 走过 `p` 个空白垫：`p` 步后头停在其后的格上。 Phase 0 walking over `p` pads. -/
+theorem seekSegR_pads : ∀ (p : Nat) (L R : List Sym),
+    seekSegR.run p
+        ⟨(0 : Fin 3), Tape.mk L (List.replicate p none ++ R)⟩ =
+      ⟨(0 : Fin 3), Tape.mk (List.replicate p none ++ L) R⟩
+  | 0, L, R => by
+      show seekSegR.run 0 ⟨(0 : Fin 3), Tape.mk L ([] ++ R)⟩ = _
+      rw [List.nil_append]
+      rfl
+  | p + 1, L, R => by
+      show seekSegR.run (p + 1)
+          ⟨(0 : Fin 3), Tape.mk L (none :: (List.replicate p none ++ R))⟩ =
+        ⟨(0 : Fin 3), Tape.mk (List.replicate (p + 1) none ++ L) R⟩
+      have hrun : seekSegR.run (p + 1)
+            ⟨(0 : Fin 3), Tape.mk L (none :: (List.replicate p none ++ R))⟩ =
+          seekSegR.run p (seekSegR.stepConfig
+            ⟨(0 : Fin 3), Tape.mk L (none :: (List.replicate p none ++ R))⟩) :=
+        DTM.run_succ_of_not_halted seekSegR p _
+          (seekSegR_halted_ne 0 (by omega) (by decide) _)
+      rw [hrun]
+      rw [seekSegR_step_pad L (List.replicate p none ++ R)]
+      rw [seekSegR_pads p (none :: L) R]
+      rw [replicate_succ_append p none L]
+
+/-- **找段整段**：从段首真格起走完整段，左移一格落到段末真格上。
+    Segment phase: walk the whole segment and step back onto its last true cell. -/
+theorem seekSegR_seg (q : Nat) (hq : 1 ≤ q) (L R : List Sym) :
+    seekSegR.run (q + 1)
+        ⟨(0 : Fin 3), Tape.mk L (List.replicate q (some true) ++ none :: R)⟩ =
+      ⟨(2 : Fin 3),
+        Tape.mk (List.replicate (q - 1) (some true) ++ L) (some true :: none :: R)⟩ := by
+  cases q with
+  | zero => omega
+  | succ q =>
+      show seekSegR.run (q + 1 + 1)
+          ⟨(0 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ =
+        ⟨(2 : Fin 3), Tape.mk (List.replicate q (some true) ++ L) (some true :: none :: R)⟩
+      -- 第 1 步：进相位 1
+      have hstep : seekSegR.run 1
+            ⟨(0 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ =
+          seekSegR.stepConfig
+            ⟨(0 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ :=
+        run_one_stp _ _ (seekSegR_halted_ne 0 (by omega) (by decide) _)
+      have h1 : seekSegR.run (q + 1 + 1)
+            ⟨(0 : Fin 3), Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩ =
+          seekSegR.run (q + 1) (seekSegR.stepConfig
+            ⟨(0 : Fin 3),
+              Tape.mk L (some true :: (List.replicate q (some true) ++ none :: R))⟩) := by
+        rw [show q + 1 + 1 = 1 + (q + 1) from by omega, DTM.run_add, hstep]
+      rw [h1]
+      rw [seekSegR_step_enter L (some true)
+        (List.replicate q (some true) ++ none :: R) (by decide)]
+      -- 走完余下 `q` 个真格
+      have h2 : seekSegR.run (q + 1)
+            ⟨(1 : Fin 3), Tape.mk (some true :: L)
+              (List.replicate q (some true) ++ none :: R)⟩ =
+          seekSegR.run 1 (seekSegR.run q
+            ⟨(1 : Fin 3), Tape.mk (some true :: L)
+              (List.replicate q (some true) ++ none :: R)⟩) := by
+        rw [DTM.run_add]
+      rw [h2]
+      rw [seekSegR_walk q (some true :: L) R]
+      -- 再 1 步：读空白左移回段末真格
+      rw [replicate_succ_append q (some true) L]
+      have hstep3 : seekSegR.run 1
+            ⟨(1 : Fin 3), Tape.mk (List.replicate (q + 1) (some true) ++ L) (none :: R)⟩ =
+          seekSegR.stepConfig
+            ⟨(1 : Fin 3), Tape.mk (List.replicate (q + 1) (some true) ++ L) (none :: R)⟩ :=
+        run_one_stp _ _ (seekSegR_halted_ne 1 (by omega) (by decide) _)
+      rw [hstep3]
+      rw [show List.replicate (q + 1) (some true) ++ L
+          = some true :: (List.replicate q (some true) ++ L) from by
+        show (some true :: List.replicate q (some true)) ++ L
+            = some true :: (List.replicate q (some true) ++ L)
+        rw [List.cons_append]]
+      rw [seekSegR_step_leave (some true) (List.replicate q (some true) ++ L) R]
+
+/-- **右行找段整段运行**：从垫上起，`p + q + 1` 步落到该段最右真格上并接受。
+    Whole run: `p + q + 1` steps from the pad onto the segment's rightmost true cell. -/
+theorem seekSegR_run (p q : Nat) (hp : 1 ≤ p) (hq : 1 ≤ q) (L R : List Sym) :
+    seekSegR.run (p + q + 1)
+        ⟨(0 : Fin 3),
+          Tape.mk L (List.replicate p none ++ List.replicate q (some true) ++ none :: R)⟩ =
+      ⟨(2 : Fin 3),
+        Tape.mk (List.replicate (q - 1) (some true) ++ List.replicate p none ++ L)
+          (some true :: none :: R)⟩ := by
+  -- 统一入口纸带上「垫 ++ 段 ++ 尾巴」的括号形状
+  rw [List.append_assoc]
+  have hsplit : seekSegR.run (p + q + 1)
+        ⟨(0 : Fin 3),
+          Tape.mk L (List.replicate p none ++ (List.replicate q (some true) ++ none :: R))⟩ =
+      seekSegR.run (q + 1) (seekSegR.run p
+        ⟨(0 : Fin 3),
+          Tape.mk L (List.replicate p none ++ (List.replicate q (some true) ++ none :: R))⟩) := by
+    rw [show p + q + 1 = p + (q + 1) from by omega, DTM.run_add seekSegR p (q + 1)]
+  rw [hsplit]
+  rw [seekSegR_pads p L (List.replicate q (some true) ++ none :: R)]
+  rw [seekSegR_seg q hq (List.replicate p none ++ L) R]
+  rw [← List.append_assoc]
+
 /-! ### 左向跳过空白 -/
 
 /-- **左向跳过空白**：左移越过所有空白格，停在第一个非空白格上并接受。
