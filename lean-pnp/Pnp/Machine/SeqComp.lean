@@ -69,6 +69,16 @@ theorem seqComp_step_natAdd (A : DTM q) (B : DTM q') (s : Fin q') (a : Sym) :
     Fin.ext (by simp)
   rw [hs]
 
+/-- 组合机接受态编号 = 左段状态数 + 右段接受态编号（定义等价）。
+    The accept index of `seqComp` in value form. -/
+theorem seqComp_accept_val (A : DTM q) (B : DTM q') :
+    (seqComp A B).accept.val = q + B.accept.val := rfl
+
+/-- 组合机拒绝态编号 = 左段状态数 + 右段拒绝态编号（定义等价）。
+    The reject index of `seqComp` in value form. -/
+theorem seqComp_reject_val (A : DTM q) (B : DTM q') :
+    (seqComp A B).reject.val = q + B.reject.val := rfl
+
 /-- 左侧状态永远不会落入组合机的接受/拒绝状态。 -/
 theorem seqComp_halt_castAdd (A : DTM q) (B : DTM q') (s : Fin q) :
     (seqComp A B).accept ≠ Fin.castAdd q' s
