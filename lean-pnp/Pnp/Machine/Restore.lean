@@ -62,6 +62,43 @@ theorem restoreTrue_run (l : List Sym) (xs : List Sym)
       rw [ih (some true :: l) hxs]
       simp [List.reverse_cons, List.append_assoc]
 
+/-- **无尾空白版**：右侧恰好以非空白块结尾（没有额外的 `none`）时，同样 `|xs|+1` 步
+    完成恢复，终态右带为 `[none]`（最后一步把读到的空白写回）。
+    The variant whose right tape ends exactly at the block (no trailing blank).
+    Same step count; the final right tape is `[none]` (the blank read at the end is
+    written back). -/
+theorem restoreTrue_run' (l : List Sym) (xs : List Sym)
+    (hne : ∀ x ∈ xs, x ≠ none) :
+    restoreTrue.run (xs.length + 1)
+      { state := (0 : Fin 4), tape := { left := l, right := xs } } =
+    { state := (2 : Fin 4),
+      tape := { left := (xs.map (fun _ => some true)).reverse ++ l, right := [none] } } := by
+  induction xs generalizing l with
+  | nil =>
+      -- 读到空白（右侧本已空）直接接受；写入的空白落成 `[none]`
+      have hhalt : restoreTrue.halted
+          { state := (0 : Fin 4),
+            tape := { left := l, right := ([] : List Sym) } } = false := by
+        simp [DTM.halted, restoreTrue]
+      rw [show ([].length + 1) = 0 + 1 by rfl, DTM.run]
+      simp only [hhalt, Bool.false_eq_true, ite_false]
+      simp [DTM.run, DTM.stepConfig, restoreTrue, Tape.read, Tape.write, Tape.move]
+  | cons x xs ih =>
+      have hx : x ≠ none := hne x List.mem_cons_self
+      have hxs : ∀ y ∈ xs, y ≠ none :=
+        fun y hy => hne y (List.mem_cons_of_mem _ hy)
+      have hhalt : restoreTrue.halted
+          { state := (0 : Fin 4), tape := { left := l, right := x :: xs } } = false := by
+        simp [DTM.halted, restoreTrue]
+      have hstep : restoreTrue.stepConfig
+          { state := (0 : Fin 4), tape := { left := l, right := x :: xs } }
+          = { state := (0 : Fin 4), tape := { left := some true :: l, right := xs } } := by
+        simp [DTM.stepConfig, restoreTrue, Tape.read, Tape.write, Tape.move, Tape.moveRight, hx]
+      rw [show (x :: xs).length + 1 = xs.length + 1 + 1 by simp, DTM.run]
+      simp only [hhalt, Bool.false_eq_true, ite_false, hstep]
+      rw [ih (some true :: l) hxs]
+      simp [List.reverse_cons, List.append_assoc]
+
 end DTM
 
 end Pnp

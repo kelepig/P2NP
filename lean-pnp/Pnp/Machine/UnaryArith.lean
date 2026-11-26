@@ -16,6 +16,7 @@
 
 import Pnp.Machine.WriteStr
 import Pnp.Machine.Double
+import Pnp.Machine.Restore
 
 namespace Pnp
 
@@ -108,6 +109,31 @@ theorem unary_double_loop (m : Nat) :
   simpa only [unary, unaryF, Nat.zero_add, List.replicate_zero, List.nil_append,
     List.append_nil]
     using double_loop m 0
+
+/-- `false` 型 unary 串整体改写成 `some true` 后等于 `unary (2m)`。
+    Rewriting a doubled `false`-marked counter into `some true` gives `unary (2m)`. -/
+theorem unaryF_map_true (m : Nat) :
+    (unaryF m ++ unaryF m).map (fun _ => some true) = unary (m + m) := by
+  simp [unaryF, unary, List.replicate_append_replicate]
+
+/-- **倍增的收尾**：对 `unaryF m ++ unaryF m`（`doubleStep` 输出的形状）运行 `restoreTrue`，
+    得到 `unary (2m)` 计数器（右侧 `[none]`）。
+    The restore stage after doubling: running `restoreTrue` on the doubled counter yields
+    `unary (2m)`. -/
+theorem unary_double_restore (m : Nat) :
+    restoreTrue.run (m + m + 1)
+      ⟨(0 : Fin 4), Tape.mk [none] (unaryF m ++ unaryF m)⟩
+      = ⟨(2 : Fin 4), Tape.mk (unary (m + m) ++ [none]) [none]⟩ := by
+  have hne : ∀ x ∈ unaryF m ++ unaryF m, x ≠ none := by
+    intro x hx
+    rcases List.mem_append.1 hx with h | h
+    · exact unaryF_ne_none m x h
+    · exact unaryF_ne_none m x h
+  have hlen : (unaryF m ++ unaryF m).length = m + m := by
+    simp [unaryF_length]
+  rw [show m + m + 1 = (unaryF m ++ unaryF m).length + 1 from by rw [hlen]]
+  rw [restoreTrue_run' [none] (unaryF m ++ unaryF m) hne]
+  simp only [unaryF_map_true, unary_reverse]
 
 end DTM
 
