@@ -2382,6 +2382,19 @@ theorem groupRound_run (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
     rw [show List.replicate (1 : Nat) none = ([none] : List Sym) from rfl,
       List.append_assoc, List.singleton_append]]
 
+/-- **一轮（计数器区入口形态）**：`a₀ = none` 时入口/出口形状相同
+    （`k ↦ q-1`、写块区 `L ↦ 真格^(2k+3) ++ 0 :: L.drop (k+2)`），故可逐段迭代。
+    One round in the counter-region entry shape (`a₀ = none`). -/
+theorem groupRound_run_none (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
+    (L R : List Sym) (hlen : k + 2 ≤ L.length) :
+    groupRoundTape B k q
+        (Tape.mk (List.replicate k (some true) ++ (none :: L))
+          (some true :: (none :: (List.replicate q (some true) ++ (none :: R)))))
+      = Tape.mk (List.replicate (q - 1) (some true)
+          ++ (none :: (List.replicate (2 * k + 3) (some true) ++ (some false :: L.drop (k + 2)))))
+        (some true :: (none :: R)) :=
+  groupRound_run B k q hkB hq none (by decide) L R hlen
+
 /-! ### 数字区组循环的一轮（纸带级） -/
 
 
