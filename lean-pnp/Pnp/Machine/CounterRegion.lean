@@ -273,6 +273,157 @@ theorem shrinkTrue_run (m : Nat) (L R : List Sym) :
   rw [run_one_stp _ _ (shrinkTrue_halted_one _ _)]
   rw [shrinkTrue_step_erase (List.replicate m (some true) ++ L)]
 
+/-! ### 左向组合回扫（跳过已写区，再跳过已消费空白） -/
+
+/-- **左向组合回扫**：相位 0 左移跳过所有非空白（已写块），相位 1 左移跳过所有空白
+    （已消费区），停在第一个非空白上（未消费真格或计数器标志格）。
+    Two-phase left scan: skip non-blank (written blocks), then skip blanks (consumed
+    region), halting on the first non-blank. -/
+def scanBackL : DTM 3 where
+  step := fun s a =>
+    if s.val = 0 then
+      if a = none then ((1 : Fin 3), a, Dir.stay)
+      else ((0 : Fin 3), a, Dir.left)
+    else if s.val = 1 then
+      if a = none then ((1 : Fin 3), a, Dir.left)
+      else ((2 : Fin 3), a, Dir.stay)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 2
+  reject := 2
+
+/-- 状态 0 处的格局不停机。 State-0 configurations never halt. -/
+theorem scanBackL_halted_zero (L R : List Sym) :
+    scanBackL.halted ⟨(0 : Fin 3), Tape.mk L R⟩ = false := by
+  show (((0 : Fin 3) == (⟨2, by omega⟩ : Fin 3))
+      || ((0 : Fin 3) == (⟨2, by omega⟩ : Fin 3))) = false
+  decide
+
+/-- 状态 1 处的格局不停机。 State-1 configurations never halt. -/
+theorem scanBackL_halted_one (L R : List Sym) :
+    scanBackL.halted ⟨(1 : Fin 3), Tape.mk L R⟩ = false := by
+  show (((1 : Fin 3) == (⟨2, by omega⟩ : Fin 3))
+      || ((1 : Fin 3) == (⟨2, by omega⟩ : Fin 3))) = false
+  decide
+
+/-- 相位 0 读到非空白：左移一格。 Phase 0 on a non-blank: move left. -/
+theorem scanBackL_step_nb (x : Sym) (L : List Sym) (a : Sym) (R : List Sym) (ha : a ≠ none) :
+    scanBackL.stepConfig ⟨(0 : Fin 3), Tape.mk (x :: L) (a :: R)⟩ =
+      ⟨(0 : Fin 3), Tape.mk L (x :: a :: R)⟩ :=
+  stepConfig_of_lit scanBackL (0 : Fin 3) a (x :: L) R (0 : Fin 3) a Dir.left
+    (Tape.mk L (x :: a :: R))
+    (by
+      simp only [scanBackL]
+      rw [if_pos (show (0 : Fin 3).val = 0 from rfl)]
+      rw [if_neg ha])
+    (by rfl)
+
+/-- 相位 0 读到空白：转入相位 1、原地不动。 Phase 0 on a blank: switch to phase 1. -/
+theorem scanBackL_step_switch (L R : List Sym) :
+    scanBackL.stepConfig ⟨(0 : Fin 3), Tape.mk L (none :: R)⟩ =
+      ⟨(1 : Fin 3), Tape.mk L (none :: R)⟩ :=
+  stepConfig_of_lit scanBackL (0 : Fin 3) none L R (1 : Fin 3) none Dir.stay
+    (Tape.mk L (none :: R))
+    (by
+      simp only [scanBackL]
+      rw [if_pos (show (0 : Fin 3).val = 0 from rfl)]
+      rfl)
+    (by rfl)
+
+/-- 相位 1 读到空白：左移一格。 Phase 1 on a blank: move left. -/
+theorem scanBackL_step_bl (x : Sym) (L R : List Sym) :
+    scanBackL.stepConfig ⟨(1 : Fin 3), Tape.mk (x :: L) (none :: R)⟩ =
+      ⟨(1 : Fin 3), Tape.mk L (x :: none :: R)⟩ :=
+  stepConfig_of_lit scanBackL (1 : Fin 3) none (x :: L) R (1 : Fin 3) none Dir.left
+    (Tape.mk L (x :: none :: R))
+    (by
+      simp only [scanBackL]
+      rw [if_neg (show ¬ ((1 : Fin 3).val = 0) from by decide)]
+      rw [if_pos (show (1 : Fin 3).val = 1 from rfl)]
+      rfl)
+    (by rfl)
+
+/-- 相位 1 读到非空白：停在原地并停机（进入接受态 2）。 Phase 1 on a non-blank: halt. -/
+theorem scanBackL_step_hit (L R : List Sym) (a : Sym) (ha : a ≠ none) :
+    scanBackL.stepConfig ⟨(1 : Fin 3), Tape.mk L (a :: R)⟩ =
+      ⟨(2 : Fin 3), Tape.mk L (a :: R)⟩ :=
+  stepConfig_of_lit scanBackL (1 : Fin 3) a L R (2 : Fin 3) a Dir.stay
+    (Tape.mk L (a :: R))
+    (by
+      simp only [scanBackL]
+      rw [if_neg (show ¬ ((1 : Fin 3).val = 0) from by decide)]
+      rw [if_pos (show (1 : Fin 3).val = 1 from rfl)]
+      rw [if_neg ha])
+    (by rfl)
+
+/-- 相位 1 的整段：越过 `m + 1` 个空白后停在非空白 `a` 上并停机。
+    Phase-1 run: over `m + 1` blanks onto the non-blank `a`. -/
+theorem scanBackL_skip_run : ∀ (m : Nat) (a : Sym) (ha : a ≠ none) (L R : List Sym),
+    scanBackL.run (m + 2)
+        ⟨(1 : Fin 3), Tape.mk (List.replicate m none ++ a :: L) (none :: R)⟩ =
+      ⟨(2 : Fin 3), Tape.mk L (a :: (List.replicate (m + 1) none ++ R))⟩
+  | 0, a, ha, L, R => by
+      rw [List.replicate_zero, List.nil_append]
+      rw [show (0 + 2 : Nat) = 1 + 1 from by omega]
+      rw [DTM.run_add scanBackL 1 1]
+      rw [run_one_stp _ _ (scanBackL_halted_one (a :: L) (none :: R))]
+      rw [scanBackL_step_bl a L R]
+      rw [run_one_stp _ _ (scanBackL_halted_one L (a :: none :: R))]
+      rw [scanBackL_step_hit L (none :: R) a ha]
+      rfl
+  | m + 1, a, ha, L, R => by
+      rw [List.replicate_succ, List.cons_append]
+      rw [show (m + 1 + 2 : Nat) = 1 + (m + 2) from by omega]
+      rw [DTM.run_add scanBackL 1 (m + 2)]
+      rw [run_one_stp _ _ (scanBackL_halted_one
+        (none :: (List.replicate m none ++ a :: L)) (none :: R))]
+      rw [scanBackL_step_bl none (List.replicate m none ++ a :: L) R]
+      rw [scanBackL_skip_run m a ha L (none :: R)]
+      rw [replicate_succ_append (m + 1) none R]
+
+set_option maxHeartbeats 4000000 in
+/-- **组合回扫整段**：头在已写区的最后一格 `b` 上，左带为「已写块 `blocks` + `m + 1` 个
+    消费空白 + 未消费区的首格 `a`」；`|blocks| + m + 4` 步后头停在 `a` 上并停机。
+    Full scan: over the written blocks and the consumed blanks onto `a`. -/
+theorem scanBackL_run : ∀ (blocks : List Sym), (∀ x ∈ blocks, x ≠ none) →
+    ∀ (m : Nat) (a : Sym) (ha : a ≠ none) (b : Sym) (bne : b ≠ none)
+      (L R : List Sym),
+      scanBackL.run (blocks.length + m + 4)
+        ⟨(0 : Fin 3),
+          Tape.mk (blocks ++ List.replicate (m + 1) none ++ a :: L) (b :: R)⟩ =
+        ⟨(2 : Fin 3),
+          Tape.mk L (a :: (List.replicate (m + 1) none ++ blocks.reverse ++ b :: R))⟩
+  | [], _, m, a, ha, b, bne, L, R => by
+      rw [List.nil_append, List.length_nil]
+      rw [show (0 + m + 4 : Nat) = 1 + (1 + (m + 2)) from by omega]
+      rw [DTM.run_add scanBackL 1 (1 + (m + 2))]
+      rw [run_one_stp _ _ (scanBackL_halted_zero
+        (List.replicate (m + 1) none ++ a :: L) (b :: R))]
+      rw [show List.replicate (m + 1) none ++ a :: L
+            = none :: (List.replicate m none ++ a :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [scanBackL_step_nb none (List.replicate m none ++ a :: L) b R bne]
+      rw [DTM.run_add scanBackL 1 (m + 2)]
+      rw [run_one_stp _ _ (scanBackL_halted_zero
+        (List.replicate m none ++ a :: L) (none :: b :: R))]
+      rw [scanBackL_step_switch (List.replicate m none ++ a :: L) (b :: R)]
+      rw [scanBackL_skip_run m a ha L (b :: R)]
+      simp
+  | c :: cs, hx, m, a, ha, b, bne, L, R => by
+      have hcs : ∀ y ∈ cs, y ≠ none := fun y hy => hx y (List.mem_cons_of_mem c hy)
+      have hc : c ≠ none := hx c List.mem_cons_self
+      rw [List.cons_append]
+      rw [show (c :: cs).length + m + 4 = 1 + (cs.length + m + 4) from by
+        rw [List.length_cons]; omega]
+      rw [DTM.run_add scanBackL 1 (cs.length + m + 4)]
+      rw [List.cons_append]
+      rw [run_one_stp _ _ (scanBackL_halted_zero
+        (c :: (cs ++ List.replicate (m + 1) none ++ a :: L)) (b :: R))]
+      rw [scanBackL_step_nb c (cs ++ List.replicate (m + 1) none ++ a :: L) b R bne]
+      rw [scanBackL_run cs hcs m a ha c hc L (b :: R)]
+      rw [List.reverse_cons]
+      simp
+
 end DTM
 
 end Pnp
