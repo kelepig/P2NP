@@ -2395,6 +2395,101 @@ theorem groupRound_run_none (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
         (some true :: (none :: R)) :=
   groupRound_run B k q hkB hq none (by decide) L R hlen
 
+/-- 计数器区右带：各段（`k+1` 个真格）之间以单个空白隔开。 -/
+def segRight : List Nat → List Sym → List Sym
+  | [], R => R
+  | k :: ks, R => List.replicate (k + 1) (some true) ++ (none :: segRight ks R)
+
+/-- 逐段累加的写块区：每轮在左侧压入 `真格^(2k+3) ++ 0`、消费 `k+2` 格空白。 -/
+def accLeft (B : Nat) : List Nat → List Sym → List Sym
+  | [], L => L
+  | [k], L => L
+  | k :: k' :: rest, L =>
+      accLeft B (k' :: rest)
+        (List.replicate (2 * k + 3) (some true) ++ (some false :: L.drop (k + 2)))
+
+/-- 逐轮应用一轮变换。 -/
+def groupIter (B : Nat) : List Nat → Tape → Tape
+  | [], t => t
+  | [_], t => t
+  | k :: k' :: rest, t => groupIter B (k' :: rest) (groupRoundTape B k (k' + 1) t)
+
+/-- 最后一轮后左带前缀的真格数（最后一段的长度参数）。 -/
+def lastLen : List Nat → Nat
+  | [] => 0
+  | [k] => k
+  | _ :: rest => lastLen rest
+
+theorem accLeft_length_le (B : Nat) :
+    ∀ (ks : List Nat) (L : List Sym), L.length ≤ (accLeft B ks L).length := by
+  intro ks
+  induction ks with
+  | nil => intro L; show L.length ≤ L.length; exact Nat.le_refl _
+  | cons k rest ih =>
+      intro L
+      cases rest with
+      | nil => show L.length ≤ L.length; exact Nat.le_refl _
+      | cons k' rest' =>
+          show L.length ≤ (accLeft B (k' :: rest')
+            (List.replicate (2 * k + 3) (some true) ++ (some false :: L.drop (k + 2)))).length
+          refine Nat.le_trans ?_ (ih _)
+          rw [List.length_append, List.length_cons, List.length_drop, List.length_replicate]
+          omega
+
+theorem groupIter_run (B : Nat) :
+    ∀ (k₀ : Nat) (rest : List Nat) (L R : List Sym),
+      (∀ k ∈ k₀ :: rest, k + 1 ≤ B) →
+      (∀ k ∈ k₀ :: rest, k + 2 ≤ L.length) →
+      groupIter B (k₀ :: rest)
+        (Tape.mk (List.replicate k₀ (some true) ++ (none :: L))
+          (some true :: (none :: segRight rest R)))
+      = Tape.mk (List.replicate (lastLen (k₀ :: rest)) (some true)
+          ++ (none :: accLeft B (k₀ :: rest) L))
+        (some true :: (none :: R)) := by
+  intro k₀ rest
+  induction rest generalizing k₀ with
+  | nil =>
+      intro L R hB hlen
+      -- 单段：不跑轮次，左右两侧都原样
+      show Tape.mk (List.replicate k₀ (some true) ++ (none :: L)) (some true :: (none :: R)) = _
+      rw [show lastLen [k₀] = k₀ from rfl, show accLeft B [k₀] L = L from rfl]
+  | cons k' rest' ih =>
+      intro L R hB hlen
+      -- 一轮：k₀ 段（前瞻 k'+1 段）
+      rw [show groupIter B (k₀ :: k' :: rest')
+          (Tape.mk (List.replicate k₀ (some true) ++ (none :: L))
+            (some true :: (none :: segRight (k' :: rest') R)))
+          = groupIter B (k' :: rest')
+            (groupRoundTape B k₀ (k' + 1)
+              (Tape.mk (List.replicate k₀ (some true) ++ (none :: L))
+                (some true :: (none :: segRight (k' :: rest') R)))) from rfl]
+      show groupIter B (k' :: rest')
+          (groupRoundTape B k₀ (k' + 1)
+            (Tape.mk (List.replicate k₀ (some true) ++ (none :: L))
+              (some true :: (none :: (List.replicate (k' + 1) (some true)
+                ++ (none :: segRight rest' R)))))) = _
+      rw [groupRound_run_none B k₀ (k' + 1) (hB k₀ (by simp)) (by omega) L
+        (segRight rest' R) (hlen k₀ (by simp))]
+      -- 归纳假设作用在「剩余段序列 + 新的写块区」上
+      rw [show k' + 1 - 1 = k' from rfl]
+      rw [ih k' (List.replicate (2 * k₀ + 3) (some true) ++ (some false :: L.drop (k₀ + 2))) R
+        (by
+          intro k hk
+          exact hB k (List.mem_cons_of_mem _ hk))
+        (by
+          intro k hk
+          have h1 : k + 2 ≤ L.length := hlen k (List.mem_cons_of_mem _ hk)
+          have h2 : L.length ≤ (List.replicate (2 * k₀ + 3) (some true)
+            ++ (some false :: L.drop (k₀ + 2))).length := by
+            rw [List.length_append, List.length_cons, List.length_drop, List.length_replicate]
+            omega
+          exact Nat.le_trans h1 h2)]
+      rw [show lastLen (k₀ :: k' :: rest') = lastLen (k' :: rest') from rfl]
+      rw [show accLeft B (k₀ :: k' :: rest') L
+          = accLeft B (k' :: rest')
+            (List.replicate (2 * k₀ + 3) (some true) ++ (some false :: L.drop (k₀ + 2))) from rfl]
+
+
 /-! ### 数字区组循环的一轮（纸带级） -/
 
 
