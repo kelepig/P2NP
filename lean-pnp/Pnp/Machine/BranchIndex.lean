@@ -107,6 +107,25 @@ theorem branchList_length (B T : Nat) : (branchList B T).length = T * B ^ T := b
   simp only [branchList, List.length_flatMap, List.length_map, List.length_range]
   rw [sum_map_const_range]
 
+/-- **分支族的计数器形式**：整个分支族（`1 ≤ t ≤ T`、`i < B^T`）上的存在量化，
+    等价于「遍历全局计数器 `j < T·B^T` 并按 `branchOfIndex` 解码」。
+    E 的外层循环只维护一个计数器 `j`，本件是「循环覆盖全族」的语义桥。
+    Existence over the whole branch family equals scanning the single global counter
+    `j < T·B^T` and decoding by `branchOfIndex`. -/
+theorem exists_branch_iff_exists_index (B T : Nat) (hBpos : 0 < B) (hT : 0 < T)
+    (P : Nat → Nat → Prop) :
+    (∃ t i, 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧ P t i) ↔
+      ∃ j, j < T * B ^ T ∧ P (branchOfIndex B T j).1 (branchOfIndex B T j).2 := by
+  constructor
+  · rintro ⟨t, i, ht1, htT, hi, hP⟩
+    refine ⟨(t - 1) * B ^ T + i, branchOfIndex_exists_lt B T t i ht1 htT hi, ?_⟩
+    rwa [branchOfIndex_exists B T t i hBpos hT ht1 hi]
+  · rintro ⟨j, hj, hP⟩
+    exact ⟨(branchOfIndex B T j).1, (branchOfIndex B T j).2,
+      Nat.succ_le_succ (Nat.zero_le _),
+      branchOfIndex_fst_le B T j hBpos hT hj,
+      branchOfIndex_snd_lt B T j hBpos, hP⟩
+
 end DTM
 
 end Pnp

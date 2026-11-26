@@ -15,6 +15,7 @@
 
 import Pnp.Machine.BranchMachine
 import Pnp.Machine.PadConflict
+import Pnp.Machine.BranchIndex
 import Pnp.Machine.AlignChainTwo
 
 namespace Pnp
@@ -541,6 +542,91 @@ theorem branchMachine_dummy_iff_two_auto {q : Nat} (M : NTM q) (w : List Bool) (
       (branchPad_ge_succ M.start w Z T B b))
     (fun t i ht1 htT => branchMachine_pre_ok_two M w T _ t i hT ht1 htT)
     (branchMachine_hpad_two M w Z T B b _ (Nat.le_refl _))
+
+
+set_option maxHeartbeats 2000000 in
+/-- **计数器形式的单条等价**：E 只维护一个全局计数器 `j < T·B^T`，分支取
+    `(t, i) = branchOfIndex B T j`；把 `branchMachine_dummy_iff_two_auto` 的「族上存在」
+    换成「计数器上存在」，是外层循环的直接接口。
+    Counter form of the per-branch equivalence — E's outer-loop interface. -/
+theorem branchMachine_dummy_iff_two_index {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
+    (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z : Nat) (hZT : Z ≤ T + 1)
+    (R : List Sym) (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject) :
+    (∃ j, j < T * B ^ T ∧
+      ((seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (branchPad M.start w Z T B b - 1)).length + 1
+            + (3 * branchPad M.start w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)) Z B
+                (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).pre.length
+                  Z T B b))
+        ⟨(seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+            (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea ((branchOfIndex B T j).2 % B :: branchBlocks B (branchOfIndex B T j).1 (branchOfIndex B T j).2)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (branchPad M.start w Z T B b - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept) ↔
+      M.AcceptsWithin w T := by
+  constructor
+  · rintro ⟨j, hj, hacc⟩
+    obtain ⟨t, i, ht1, htT, hi, hPi⟩ :=
+      (exists_branch_iff_exists_index B T hBpos hT (fun t i =>
+        ((seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (branchPad M.start w Z T B b - 1)).length + 1
+            + (3 * branchPad M.start w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)) Z B
+                (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).pre.length
+                  Z T B b))
+        ⟨(seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+            (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (branchPad M.start w Z T B b - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept)).mpr ⟨j, hj, hacc⟩
+    exact (branchMachine_dummy_iff_two_auto M w a l' hw hl hB hBpos T b hbnd hT Z hZT R
+      hxacc hxre).mp ⟨t, i, ht1, htT, hi, hPi⟩
+  · intro hacc
+    obtain ⟨t, i, ht1, htT, hi, hPi⟩ :=
+      (branchMachine_dummy_iff_two_auto M w a l' hw hl hB hBpos T b hbnd hT Z hZT R
+        hxacc hxre).mpr hacc
+    exact (exists_branch_iff_exists_index B T hBpos hT (fun t i =>
+      ((seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (branchPad M.start w Z T B b - 1)).length + 1
+            + (3 * branchPad M.start w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)) Z B
+                (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).pre.length
+                  Z T B b))
+        ⟨(seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+            (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (branchPad M.start w Z T B b - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept)).mp ⟨t, i, ht1, htT, hi, hPi⟩
 
 end DTM
 
