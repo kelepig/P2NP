@@ -1047,3 +1047,39 @@ theorem mulCheck_done_run (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
   etape
   rw [estepMK 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega) (by omega)]
   etape
+
+/-! ### 一轮 + 检测的合成（自动收尾循环的归纳步） -/
+
+/-- **一轮之后再做检测**：一轮结束后（B 还有未消费格，`r + 2 ≤ b`），检测相位把机器带回
+    下一轮的起点（A 最右格），因此「轮 + 检测」构成一个可迭代的循环步。
+    One round followed by the check: when `B` still has unconsumed cells (`r + 2 ≤ b`), the
+    check phase returns to the next round's start, so "round + check" is one loop step. -/
+theorem mulRoundCheck_run (a b r w d : Nat) (ha : 1 ≤ a) (hb : r + 2 ≤ b) (hwa : a ≤ w)
+    (L R : List Sym) :
+    mulCheck.run (2 * a + 4)
+      ⟨mulCheck.start,
+        (mulRound.run (mulRoundSteps a b r w d)
+          ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩).tape⟩
+      = ⟨mulCheck.accept,
+          Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+  have hround := mulRound_run a b r w d ha (by omega) hwa L R
+  -- 终点的左带里 B 的最近格是 `some true`：把 `replicate (b - (r+1))` 拆出头
+  have hb1 : 1 ≤ b - (r + 1) := by omega
+  rcases hb' : b - (r + 1) with _ | k
+  · omega
+  have hrun := mulCheck_continue_run a ha
+    (List.replicate k (some true) ++
+      (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))
+    (List.replicate (d + a) (some false) ++
+      (none :: (List.replicate (w - a) (none : Sym) ++ R)))
+  -- 目标里的「轮终点」形态与检测的前提形态对齐
+  rw [hround]
+  have hshape : mulB b (r + 1) L
+      = none :: (some true :: (List.replicate k (some true) ++
+          (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))) := by
+    simp only [mulB]
+    rw [hb', List.replicate_succ]
+    simp only [List.cons_append, List.append_assoc]
+  simp only [mulL, mulR, List.replicate_zero, List.nil_append]
+  rw [hshape]
+  exact hrun
