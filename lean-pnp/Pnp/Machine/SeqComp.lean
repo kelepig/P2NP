@@ -143,6 +143,31 @@ theorem seqComp_switch (A : DTM q) (B : DTM q') (c : Config q)
   have hs : c.state.val = A.accept.val := congrArg Fin.val hacc
   rw [dite_eq_left hs]
 
+/-- **组合机整段运行（装配引理）**：A 恰好 `na` 步跑到接受态、纸带 `t'`（右侧非空，切换步
+    不改变纸带），B 从起始态在 `t'` 上跑 `nb` 步到接受态、纸带 `t''`；两段各自前缀内不停机。
+    结论：组合机 `na + 1 + nb` 步从 A 的起点直达 B 的接受态。
+    End-to-end run of a sequential composition: A's full run, the one-step switch, B's run. -/
+theorem seqComp_run (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q)
+    (t' t'' : Tape)
+    (hA : A.run na c = ⟨A.accept, t'⟩)
+    (hne : t'.right ≠ [])
+    (hB : B.run nb ⟨B.start, t'⟩ = ⟨B.accept, t''⟩)
+    (hnhA : ∀ k, k < na → A.halted (A.run k c) = false)
+    (hnhB : ∀ k, k < nb → B.halted (B.run k ⟨B.start, t'⟩) = false) :
+    (seqComp A B).run (na + 1 + nb) ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.natAdd q B.accept, t''⟩ := by
+  -- 先拆出 B 段，再把前段（A + 切换）整体化简
+  rw [show na + 1 + nb = (na + 1) + nb from by omega,
+    DTM.run_add (seqComp A B) (na + 1) nb]
+  have hInner : (seqComp A B).run (na + 1) ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.natAdd q B.start, t'⟩ := by
+    rw [DTM.run_add (seqComp A B) na 1, seqComp_embed_left A B na c hnhA, hA,
+      seqComp_switch A B ⟨A.accept, t'⟩ rfl]
+    -- 切换步的纸带：写回读到的符号、原地不动
+    rw [show ((t'.write t'.read).move Dir.stay) = t' from by
+      rw [Tape.write_read _ hne, Tape.move]]
+  rw [hInner, seqComp_embed_right A B nb ⟨B.start, t'⟩ hnhB, hB]
+
 end DTM
 
 end Pnp
