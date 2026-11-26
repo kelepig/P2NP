@@ -118,6 +118,7 @@ import Pnp.Machine.PowCtl
 import Pnp.Machine.ObsPhase
 import Pnp.Machine.ObsBudget
 import Pnp.Machine.BranchPhase
+import Pnp.Machine.Locality
 import Pnp.Machine.MulCopy
 import Pnp.Machine.MulConsume
 import Pnp.Machine.MulRestore
