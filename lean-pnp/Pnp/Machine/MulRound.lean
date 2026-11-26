@@ -1430,3 +1430,695 @@ theorem mulMachine_run_final (n : Nat) (c : Config 4)
   run_embed mulFinal mulMachine mulEmbF
     (fun s a ha _ => mulMachine_step_final s a ha)
     (fun s h1 _ => mulMachine_halt_final s h1) n c hnh
+
+/-! ### 三个相位机的「段内不停机」引理 -/
+
+/-- 以数值比较给出「非终止」前提的按段不停机引理（便于收口）。
+    A numeral-based variant of `no_halt_of_run_end`. -/
+theorem no_halt_of_run_end_nat {q : Nat} (M : DTM q) (n : Nat) (c : Config q) (s : Fin q)
+    (t : Tape) (h : M.run n c = ⟨s, t⟩) (ha : s.val ≠ M.accept.val) (hr : s.val ≠ M.reject.val) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  refine no_halt_of_run_end M n c s t h ?_ ?_
+  · intro hh
+    exact ha (congrArg Fin.val hh)
+  · intro hh
+    exact hr (congrArg Fin.val hh)
+
+
+/-- `Fin 6` 上数值不为 4 的元素与 `mulCheck.accept` 的数值不同。 -/
+theorem mulCheck_val_ne_acc {st : Nat} (hst : st < 6) (h : st ≠ 4) :
+    (⟨st, hst⟩ : Fin 6).val ≠ mulCheck.accept.val := by
+  intro hh
+  have hv : st = 4 := by
+    rw [show mulCheck.accept.val = 4 from rfl] at hh
+    simpa using hh
+  exact h hv
+
+/-- `Fin 6` 上数值不为 5 的元素与 `mulCheck.reject` 的数值不同。 -/
+theorem mulCheck_val_ne_rej {st : Nat} (hst : st < 6) (h : st ≠ 5) :
+    (⟨st, hst⟩ : Fin 6).val ≠ mulCheck.reject.val := by
+  intro hh
+  have hv : st = 5 := by
+    rw [show mulCheck.reject.val = 5 from rfl] at hh
+    simpa using hh
+  exact h hv
+
+/-- `Fin 4` 上数值不为 3 的元素与 `mulFinal.accept` 的数值不同。 -/
+theorem mulFinal_val_ne {st : Nat} (hst : st < 4) (h : st ≠ 3) :
+    (⟨st, hst⟩ : Fin 4).val ≠ mulFinal.accept.val := by
+  intro hh
+  have hv : st = 3 := by
+    rw [show mulFinal.accept.val = 3 from rfl] at hh
+    simpa using hh
+  exact h hv
+
+/-- 检测「继续」通路在最后一步之前不停机。
+    The check's continue path never halts before its final step. -/
+theorem mulCheck_continue_no_halt (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    ∀ k, k < 2 * a + 4 →
+      mulCheck.halted
+        (mulCheck.run k
+          ⟨(⟨0, by omega⟩ : Fin 6),
+            Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+              (some true :: (none :: R))⟩) = false := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  -- 各段的累计终点（与 `mulCheck_continue_run` 同一分解）
+  have c1 : mulCheck.run a'
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (some true :: P))
+            (List.replicate a' (some true) ++ (some true :: (none :: R)))⟩ :=
+    mulCheck_skipA a' (none :: (some true :: P)) (none :: R)
+  have c2 : mulCheck.run (a' + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (some true :: P)
+            (none :: (some true :: (List.replicate a' (some true) ++ (none :: R))))⟩ := by
+    rw [DTM.run_add mulCheck a' 1, c1]
+    rw [← cons_replicate_append (some true) a' (none :: R)]
+    rw [estepMK 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have c3 : mulCheck.run (a' + 1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6),
+          Tape.mk P
+            (some true :: (none ::
+              (some true :: (List.replicate a' (some true) ++ (none :: R)))))⟩ := by
+    rw [DTM.run_add mulCheck (a' + 1) 1, c2]
+    rw [estepMK 0 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have c4 : mulCheck.run (a' + 1 + 1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨2, by omega⟩ : Fin 6),
+          Tape.mk (some true :: P)
+            (none :: (some true :: (List.replicate a' (some true) ++ (none :: R))))⟩ := by
+    rw [DTM.run_add mulCheck (a' + 1 + 1) 1, c3]
+    rw [estepMK 1 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have c5 : mulCheck.run (a' + 1 + 1 + 1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨3, by omega⟩ : Fin 6),
+          Tape.mk (none :: (some true :: P))
+            (some true :: (List.replicate a' (some true) ++ (none :: R)))⟩ := by
+    rw [DTM.run_add mulCheck (a' + 1 + 1 + 1) 1, c4]
+    rw [estepMK 2 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have c6 : mulCheck.run (a' + 1)
+      (mulCheck.run (a' + 1 + 1 + 1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)
+      = ⟨(⟨3, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate (a' + 1) (some true) ++ (none :: (some true :: P)))
+            (none :: R)⟩ := by
+    rw [c5]
+    rw [cons_replicate_append (some true) a' (none :: R)]
+    rw [replicate_succ_append a' (some true) (none :: R)]
+    rw [mulCheck_skipR (a' + 1) (none :: (some true :: P)) R]
+  -- 各段不停机（起点状态从累计终点读出）
+  have h1 : ∀ k, k < a' → mulCheck.halted
+      (mulCheck.run k
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩) = false :=
+    no_halt_of_run_end_nat mulCheck a' _ (⟨0, by omega⟩ : Fin 6) _ c1
+      (mulCheck_val_ne_acc (by omega) (by decide)) (mulCheck_val_ne_rej (by omega) (by decide))
+  have h2 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run a'
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c1]
+    exact mulCheck_halted_ne 0 (by omega) (by decide) (by decide) _
+  have h3 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c2]
+    exact mulCheck_halted_ne 0 (by omega) (by decide) (by decide) _
+  have h4 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c3]
+    exact mulCheck_halted_ne 1 (by omega) (by decide) (by decide) _
+  have h5 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1 + 1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c4]
+    exact mulCheck_halted_ne 2 (by omega) (by decide) (by decide) _
+  have h6 : ∀ k, k < a' + 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1 + 1 + 1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false :=
+    no_halt_of_run_end_nat mulCheck (a' + 1) _ (⟨3, by omega⟩ : Fin 6) _ c6
+      (mulCheck_val_ne_acc (by omega) (by decide)) (mulCheck_val_ne_rej (by omega) (by decide))
+  have h7 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1 + 1 + 1 + 1 + (a' + 1))
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [DTM.run_add mulCheck (a' + 1 + 1 + 1 + 1) (a' + 1)]
+    rw [c6]
+    exact mulCheck_halted_ne 3 (by omega) (by decide) (by decide) _
+  -- 逐段拼接
+  have hAB := no_halt_add mulCheck a' 1 _ h1 h2
+  have hABC := no_halt_add mulCheck (a' + 1) 1 _ hAB h3
+  have hABCD := no_halt_add mulCheck (a' + 1 + 1) 1 _ hABC h4
+  have hABCDE := no_halt_add mulCheck (a' + 1 + 1 + 1) 1 _ hABCD h5
+  have hABCDEF := no_halt_add mulCheck (a' + 1 + 1 + 1 + 1) (a' + 1) _ hABCDE h6
+  have hAll := no_halt_add mulCheck (a' + 1 + 1 + 1 + 1 + (a' + 1)) 1 _ hABCDEF h7
+  rw [show 2 * (a' + 1) + 4 = (a' + 1 + 1 + 1 + 1 + (a' + 1)) + 1 from by omega]
+  exact hAll
+
+/-- 检测「耗尽」通路在最后一步之前不停机。
+    The check's exhausted path never halts before its final step. -/
+theorem mulCheck_done_no_halt (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    ∀ k, k < a + 2 →
+      mulCheck.halted
+        (mulCheck.run k
+          ⟨(⟨0, by omega⟩ : Fin 6),
+            Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+              (some true :: (none :: R))⟩) = false := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  have c1 : mulCheck.run a'
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (some false :: P))
+            (List.replicate a' (some true) ++ (some true :: (none :: R)))⟩ :=
+    mulCheck_skipA a' (none :: (some false :: P)) (none :: R)
+  have c2 : mulCheck.run (a' + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (some false :: P)
+            (none :: (some true :: (List.replicate a' (some true) ++ (none :: R))))⟩ := by
+    rw [DTM.run_add mulCheck a' 1, c1]
+    rw [← cons_replicate_append (some true) a' (none :: R)]
+    rw [estepMK 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have c3 : mulCheck.run (a' + 1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6),
+          Tape.mk P
+            (some false :: (none ::
+              (some true :: (List.replicate a' (some true) ++ (none :: R)))))⟩ := by
+    rw [DTM.run_add mulCheck (a' + 1) 1, c2]
+    rw [estepMK 0 (by omega) none _ _ _ (by rfl) _ _ (by omega) (by omega)]
+    etape
+  have h1 : ∀ k, k < a' → mulCheck.halted
+      (mulCheck.run k
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+            (some true :: (none :: R))⟩) = false :=
+    no_halt_of_run_end_nat mulCheck a' _ (⟨0, by omega⟩ : Fin 6) _ c1
+      (mulCheck_val_ne_acc (by omega) (by decide)) (mulCheck_val_ne_rej (by omega) (by decide))
+  have h2 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run a'
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c1]
+    exact mulCheck_halted_ne 0 (by omega) (by decide) (by decide) _
+  have h3 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c2]
+    exact mulCheck_halted_ne 0 (by omega) (by decide) (by decide) _
+  have h4 : ∀ k, k < 1 → mulCheck.halted
+      (mulCheck.run k (mulCheck.run (a' + 1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate a' (some true) ++ (none :: (some false :: P)))
+            (some true :: (none :: R))⟩)) = false := by
+    refine no_halt_one mulCheck _ ?_
+    rw [c3]
+    exact mulCheck_halted_ne 1 (by omega) (by decide) (by decide) _
+  have hAB := no_halt_add mulCheck a' 1 _ h1 h2
+  have hABC := no_halt_add mulCheck (a' + 1) 1 _ hAB h3
+  have hAll := no_halt_add mulCheck (a' + 1 + 1) 1 _ hABC h4
+  rw [show a' + 1 + 2 = (a' + 1 + 1) + 1 from by omega]
+  exact hAll
+
+/-- 收尾相位在最后一步之前不停机。
+    The final phase never halts before its final step. -/
+theorem mulFinal_no_halt (a d : Nat) (ha : 1 ≤ a) (hd : 1 ≤ d) (P R : List Sym) :
+    ∀ k, k < a + d + 4 →
+      mulFinal.halted
+        (mulFinal.run k
+          ⟨(⟨0, by omega⟩ : Fin 4),
+            Tape.mk P (some false :: (none ::
+              (List.replicate (a - 1) (some true) ++
+                (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩) = false := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  have f1 : mulFinal.run 1
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk (some false :: P) (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R))))))⟩ := by
+    rw [estepMF2 0 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+    etape
+  have f2 : mulFinal.run (1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 4),
+          Tape.mk (none :: (some false :: P))
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))⟩ := by
+    rw [DTM.run_add mulFinal 1 1, f1]
+    rw [estepMF2 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+    etape
+  have f3 : mulFinal.run (a' + 1) (mulFinal.run (1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)
+      = ⟨(⟨1, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P)))
+            (none :: (List.replicate d (some false) ++ (none :: R)))⟩ := by
+    rw [f2]
+    rw [replicate_succ_append a' (some true)
+      (none :: (List.replicate d (some false) ++ (none :: R)))]
+    rw [mulFinal_skipT (a' + 1) (none :: (some false :: P))
+      (List.replicate d (some false) ++ (none :: R))]
+  have f4 : mulFinal.run 1 (mulFinal.run (a' + 1) (mulFinal.run (1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩))
+      = ⟨(⟨2, by omega⟩ : Fin 4),
+          Tape.mk (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P))))
+            (List.replicate d (some false) ++ (none :: R))⟩ := by
+    rw [f3]
+    rw [estepMF2 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+    etape
+  have f5 : mulFinal.run d (mulFinal.run 1 (mulFinal.run (a' + 1) (mulFinal.run (1 + 1)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)))
+      = ⟨(⟨2, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate d (some true) ++
+              (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩ := by
+    rw [f4]
+    rw [mulFinal_conv d
+      (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P)))) R]
+  -- 各段不停机
+  have g1 : ∀ k, k < 1 → mulFinal.halted
+      (mulFinal.run k
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩) = false := by
+    refine no_halt_one mulFinal _ ?_
+    exact mulFinal_halted_ne 0 (by omega) (by decide) _
+  have g2 : ∀ k, k < 1 → mulFinal.halted
+      (mulFinal.run k (mulFinal.run 1
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)) = false := by
+    refine no_halt_one mulFinal _ ?_
+    rw [f1]
+    exact mulFinal_halted_ne 0 (by omega) (by decide) _
+  have g3 : ∀ k, k < a' + 1 → mulFinal.halted
+      (mulFinal.run k (mulFinal.run (1 + 1)
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)) = false :=
+    no_halt_of_run_end_nat mulFinal (a' + 1) _ (⟨1, by omega⟩ : Fin 4) _ f3
+      (mulFinal_val_ne (by omega) (by decide)) (mulFinal_val_ne (by omega) (by decide))
+  have f4c : mulFinal.run 1 (mulFinal.run (1 + 1 + (a' + 1))
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)
+      = ⟨(⟨2, by omega⟩ : Fin 4),
+          Tape.mk (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P))))
+            (List.replicate d (some false) ++ (none :: R))⟩ := by
+    rw [DTM.run_add mulFinal (1 + 1) (a' + 1)]
+    rw [f4]
+  have g4 : ∀ k, k < 1 → mulFinal.halted
+      (mulFinal.run k (mulFinal.run (1 + 1 + (a' + 1))
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)) = false :=
+    no_halt_of_run_end_nat mulFinal 1 _ (⟨2, by omega⟩ : Fin 4) _ f4c
+      (mulFinal_val_ne (by omega) (by decide)) (mulFinal_val_ne (by omega) (by decide))
+  have f5c : mulFinal.run d (mulFinal.run (1 + 1 + (a' + 1) + 1)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate a' (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)
+      = ⟨(⟨2, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate d (some true) ++
+              (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩ := by
+    rw [DTM.run_add mulFinal (1 + 1 + (a' + 1)) 1]
+    rw [DTM.run_add mulFinal (1 + 1) (a' + 1)]
+    rw [f5]
+  have g5 : ∀ k, k < d → mulFinal.halted
+      (mulFinal.run k (mulFinal.run (1 + 1 + (a' + 1) + 1)
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)) = false :=
+    no_halt_of_run_end_nat mulFinal d _ (⟨2, by omega⟩ : Fin 4) _ f5c
+      (mulFinal_val_ne (by omega) (by decide)) (mulFinal_val_ne (by omega) (by decide))
+  have g6 : ∀ k, k < 1 → mulFinal.halted
+      (mulFinal.run k (mulFinal.run (1 + 1 + (a' + 1) + 1 + d)
+        ⟨(⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate a' (some true) ++
+              (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩)) = false := by
+    refine no_halt_one mulFinal _ ?_
+    rw [DTM.run_add mulFinal (1 + 1 + (a' + 1) + 1) d]
+    rw [f5c]
+    exact mulFinal_halted_ne 2 (by omega) (by decide) _
+  have gA := no_halt_add mulFinal 1 1 _ g1 g2
+  have gB := no_halt_add mulFinal (1 + 1) (a' + 1) _ gA g3
+  have gC := no_halt_add mulFinal (1 + 1 + (a' + 1)) 1 _ gB g4
+  have gD := no_halt_add mulFinal (1 + 1 + (a' + 1) + 1) d _ gC g5
+  have gAll := no_halt_add mulFinal (1 + 1 + (a' + 1) + 1 + d) 1 _ gD g6
+  rw [show a' + 1 + d + 4 = (1 + 1 + (a' + 1) + 1 + d) + 1 from by omega]
+  exact gAll
+
+/-! ### 整机阶段搬运（轮 / 检测 / 收尾） -/
+
+/-- 整机在给定格局的停机判定（便于用状态不等式收口）。 -/
+theorem mulMachine_halted_false (s : Fin 28) (t : Tape)
+    (h1 : s ≠ mulMachine.accept) (h2 : s ≠ mulMachine.reject) :
+    mulMachine.halted ⟨s, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr h1, beq_eq_false_iff_ne.mpr h2⟩
+
+/-- 整机**一轮**：轮机的整段运行 + 1 步改接（接受态 17 → 检测入口 18）。
+    One whole-machine round: the round's run plus the redirect step 17 → 18. -/
+theorem mulMachine_phase_round (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    mulMachine.run (mulRoundSteps a b r w d + 1)
+      ⟨mulMachine.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulEmbC mulCheck.start,
+          Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+  show mulMachine.run (mulRoundSteps a b r w d + 1)
+      ⟨mulEmbR mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulEmbC mulCheck.start,
+          Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩
+  have h1 := mulMachine_run_round (mulRoundSteps a b r w d)
+    ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+    (mulRound_no_halt a b r w d ha hb hwa L R)
+  have h2 : mulRound.run (mulRoundSteps a b r w d)
+      ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulRound.accept,
+          Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ :=
+    mulRound_run a b r w d ha hb hwa L R
+  rw [h2] at h1
+  dsimp only at h1
+  have hnh : mulMachine.halted
+      ⟨mulEmbR mulRound.accept,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ = false := by
+    have hh := mulMachine_halt_round mulRound.accept
+    exact mulMachine_halted_false _ _ hh.1.symm hh.2.symm
+  have hstep : mulMachine.stepConfig
+      ⟨mulEmbR mulRound.accept,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ =
+      ⟨mulEmbC mulCheck.start,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+    rw [DTM.stepConfig, mulMachine_step_17]
+    simp [Tape.write_read, Tape.move, mulEmbC, mulCheck]
+  rw [DTM.run_add mulMachine (mulRoundSteps a b r w d) 1, h1]
+  rw [DTM.run_succ_of_not_halted mulMachine 0 _ hnh]
+  exact hstep
+
+/-- 检测「继续」：检测段 + 1 步改接（22 → 0），把机器带回轮的起点。
+    Check (continue): the check segment plus the redirect step 22 → 0. -/
+theorem mulMachine_phase_check_continue (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    mulMachine.run (2 * a + 4 + 1)
+      ⟨mulEmbC mulCheck.start,
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 28),
+          Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩ := by
+  show mulMachine.run (2 * a + 4 + 1)
+      ⟨mulEmbC (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨(⟨0, by omega⟩ : Fin 28),
+          Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩
+  have h1 := mulMachine_run_check (2 * a + 4)
+    ⟨(⟨0, by omega⟩ : Fin 6),
+      Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+        (some true :: (none :: R))⟩
+    (mulCheck_continue_no_halt a ha P R)
+  have h2 : mulCheck.run (2 * a + 4)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨mulCheck.accept,
+          Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+            (some true :: (none :: R))⟩ := by
+    simpa [mulCheck] using mulCheck_continue_run a ha P R
+  rw [h2] at h1
+  dsimp only at h1
+  have hnh : mulMachine.halted
+      ⟨mulEmbC mulCheck.accept,
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩ = false := by
+    have hh := mulMachine_halt_check mulCheck.accept
+    exact mulMachine_halted_false _ _ hh.1.symm hh.2.symm
+  have hstep : mulMachine.stepConfig
+      ⟨mulEmbC mulCheck.accept,
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩ =
+      ⟨(⟨0, by omega⟩ : Fin 28),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some true :: P)))
+          (some true :: (none :: R))⟩ := by
+    rw [DTM.stepConfig, mulMachine_step_22]
+    simp [Tape.write_read, Tape.move]
+  rw [DTM.run_add mulMachine (2 * a + 4) 1, h1]
+  rw [DTM.run_succ_of_not_halted mulMachine 0 _ hnh]
+  exact hstep
+
+/-- 检测「耗尽」：检测段 + 1 步改接（23 → 24），进入收尾相位。
+    Check (exhausted): the check segment plus the redirect step 23 → 24. -/
+theorem mulMachine_phase_check_done (a : Nat) (ha : 1 ≤ a) (P R : List Sym) :
+    mulMachine.run (a + 2 + 1)
+      ⟨mulEmbC mulCheck.start,
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨mulEmbF mulFinal.start,
+          Tape.mk P (some false :: (none ::
+            (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ := by
+  show mulMachine.run (a + 2 + 1)
+      ⟨mulEmbC (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨mulEmbF (⟨0, by omega⟩ : Fin 4),
+          Tape.mk P (some false :: (none ::
+            (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩
+  have h1 := mulMachine_run_check (a + 2)
+    ⟨(⟨0, by omega⟩ : Fin 6),
+      Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+        (some true :: (none :: R))⟩
+    (mulCheck_done_no_halt a ha P R)
+  have h2 : mulCheck.run (a + 2)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate (a - 1) (some true) ++ (none :: (some false :: P)))
+          (some true :: (none :: R))⟩
+      = ⟨mulCheck.reject,
+          Tape.mk P (some false :: (none ::
+            (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ := by
+    simpa [mulCheck] using mulCheck_done_run a ha P R
+  rw [h2] at h1
+  dsimp only at h1
+  have hnh : mulMachine.halted
+      ⟨mulEmbC mulCheck.reject,
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ = false := by
+    have hh := mulMachine_halt_check mulCheck.reject
+    exact mulMachine_halted_false _ _ hh.1.symm hh.2.symm
+  have hstep : mulMachine.stepConfig
+      ⟨mulEmbC mulCheck.reject,
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ =
+      ⟨mulEmbF mulFinal.start,
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++ (some true :: (none :: R)))))⟩ := by
+    rw [DTM.stepConfig, mulMachine_step_23]
+    simp [Tape.write_read, Tape.move, mulEmbF, mulFinal]
+  rw [DTM.run_add mulMachine (a + 2) 1, h1]
+  rw [DTM.run_succ_of_not_halted mulMachine 0 _ hnh]
+  exact hstep
+
+/-- 收尾相位：从 B 的耗尽位置跑到接受态（27）。
+    The final phase: from B's exhausted position all the way to the accept state. -/
+theorem mulMachine_phase_final (a d : Nat) (ha : 1 ≤ a) (hd : 1 ≤ d) (P R : List Sym) :
+    mulMachine.run (a + d + 4)
+      ⟨mulEmbF mulFinal.start,
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨mulEmbF mulFinal.accept,
+          Tape.mk (List.replicate d (some true) ++
+              (none :: (List.replicate a (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩ := by
+  show mulMachine.run (a + d + 4)
+      ⟨mulEmbF (⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨mulEmbF mulFinal.accept,
+          Tape.mk (List.replicate d (some true) ++
+              (none :: (List.replicate a (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩
+  have h1 := mulMachine_run_final (a + d + 4)
+    ⟨(⟨0, by omega⟩ : Fin 4),
+      Tape.mk P (some false :: (none ::
+        (List.replicate (a - 1) (some true) ++
+          (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+    (mulFinal_no_halt a d ha hd P R)
+  have h2 : mulFinal.run (a + d + 4)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨mulFinal.accept,
+          Tape.mk (List.replicate d (some true) ++
+              (none :: (List.replicate a (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩ := by
+    simpa [mulFinal] using mulFinal_run a d ha hd P R
+  rw [h2] at h1
+  dsimp only at h1
+  simpa using h1
+
+
+/-- `mulMachine.start` 的字面量形态。 -/
+theorem mulMachine_start_eq : mulMachine.start = (⟨0, by omega⟩ : Fin 28) := rfl
+
+/-! ### 循环步与多轮不变式 -/
+
+/-- 「一轮 + 检测继续」的整机运行：回到轮起点，`r ↦ r+1`、`d ↦ d+a`、`w ↦ w-a`。
+    The "round + continue check" whole-machine step returns to the round start. -/
+theorem mulMachine_loop_step (a b r w d : Nat) (ha : 1 ≤ a) (hb : r + 2 ≤ b) (hwa : a ≤ w)
+    (L R : List Sym) :
+    mulMachine.run (mulRoundSteps a b r w d + 1 + (2 * a + 4) + 1)
+      ⟨mulMachine.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulMachine.start, Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+  -- B 还剩 `k+1` 个未消费格 ⇒ 检测读到 `some true`
+  have hb1 : 1 ≤ b - (r + 1) := by omega
+  rcases hb' : b - (r + 1) with _ | k
+  · omega
+  have hshape : mulB b (r + 1) L
+      = none :: (some true :: (List.replicate k (some true) ++
+          (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))) := by
+    simp only [mulB]
+    rw [hb', List.replicate_succ]
+    simp
+  have hP : mulL a b (r + 1) 0 L
+      = List.replicate (a - 1) (some true) ++ (none :: (some true ::
+          (List.replicate k (some true) ++
+            (List.replicate (r + 1) (some false) ++ (none :: (none :: L)))))) := by
+    simp only [mulL, Nat.sub_zero]
+    rw [hshape]
+  have hQ : mulR (d + a) 0 (w - a) R
+      = some true :: (none :: (List.replicate (d + a) (some false) ++
+          (none :: (List.replicate (w - a) (none : Sym) ++ R)))) := by
+    simp [mulR]
+  rw [show mulRoundSteps a b r w d + 1 + (2 * a + 4) + 1
+      = (mulRoundSteps a b r w d + 1) + (2 * a + 4 + 1) from by omega]
+  rw [DTM.run_add mulMachine (mulRoundSteps a b r w d + 1) (2 * a + 4 + 1)]
+  rw [mulMachine_phase_round a b r w d ha (by omega) hwa L R]
+  rw [hP, hQ]
+  rw [mulMachine_phase_check_continue a ha
+    (List.replicate k (some true) ++
+      (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))
+    (List.replicate (d + a) (some false) ++
+      (none :: (List.replicate (w - a) (none : Sym) ++ R)))]
+  rw [← hP, ← hQ]
+  rw [← mulMachine_start_eq]
+
+/-- 到第 `k` 轮为止的累计步数。
+    Total steps up to (and including) round `k` and its continue checks. -/
+def mulLoopSteps : Nat → Nat → Nat → Nat → Nat
+  | 0, _, _, _ => 0
+  | k + 1, a, b, W =>
+      mulLoopSteps k a b W + (mulRoundSteps a b k (W - k * a) (k * a) + 1 + (2 * a + 4) + 1)
+
+/-- **多轮循环不变式**：从 `r = 0, d = 0, w = W` 出发，前 `k` 轮（每轮后接继续检测）
+    让机器回到轮起点，且 `r = k`、`d = k·a`、`w = W - k·a`。
+    The multi-round invariant: `k` rounds (each followed by a continue check) bring the
+    machine back to the round start with `r = k`, `d = k·a`, `w = W - k·a`. -/
+theorem mulMachine_loops : ∀ (k a b W : Nat), 1 ≤ a → k + 2 ≤ b → k * a ≤ W →
+    ∀ L R : List Sym,
+    mulMachine.run (mulLoopSteps k a b W)
+      ⟨mulMachine.start, Tape.mk (mulL a b 0 0 L) (mulR 0 0 W R)⟩
+      = ⟨mulMachine.start, Tape.mk (mulL a b k 0 L) (mulR (k * a) 0 (W - k * a) R)⟩ := by
+  intro k
+  induction k with
+  | zero =>
+      intro a b W _ _ _ L R
+      simp [mulLoopSteps, DTM.run]
+  | succ k ih =>
+      intro a b W ha hk hW L R
+      rw [show mulLoopSteps (k + 1) a b W
+          = mulLoopSteps k a b W
+            + (mulRoundSteps a b k (W - k * a) (k * a) + 1 + (2 * a + 4) + 1) from rfl]
+      rw [DTM.run_add]
+      have hk' : k + 2 ≤ b := by omega
+      have hW' : k * a ≤ W := by
+        have h := hW
+        rw [Nat.succ_mul] at h
+        omega
+      have hwa' : a ≤ W - k * a := by
+        have h := hW
+        rw [Nat.succ_mul] at h
+        omega
+      rw [ih a b W ha hk' hW' L R]
+      rw [mulMachine_loop_step a b k (W - k * a) (k * a) ha hk' hwa' L R]
+      rw [Nat.succ_mul]
+      rw [show W - k * a - a = W - (k * a + a) from by omega]
