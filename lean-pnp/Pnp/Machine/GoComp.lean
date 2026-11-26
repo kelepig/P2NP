@@ -76,6 +76,36 @@ theorem goLeft2_run (a b : Nat) (t : Tape) (hr : t.right ≠ []) :
     rw [goLeft_run_from b k 0 (moveLeftN a t) (by omega) hne]
     exact goLeft_halted_false b (0 + k) (by omega) (moveLeftN k (moveLeftN a t))
 
+/-- `goLeft2_run` 的「纸带合并」写法：左移总次数合并成 `moveLeftN (a+b)`，
+    便于与既有纸带级规格（如 `moveLeftN (3*(T+1))`）直接对接。
+    Paper-level form of `goLeft2_run`, merged into `moveLeftN (a + b)`. -/
+theorem goLeft2_run_add (a b : Nat) (t : Tape) (hr : t.right ≠ []) :
+    (goLeft2 a b).run (a + 1 + b) ⟨(goLeft2 a b).start, t⟩
+      = ⟨(goLeft2 a b).accept, moveLeftN (a + b) t⟩ := by
+  rw [goLeft2_run a b t hr, moveLeftN_add]
+
+/-- **`goLeft2` 左半段不停机**（`k ≤ a`）：组合机在左侧状态处不是终止态。
+    The left half of `goLeft2` never halts (composite accept/reject live on the right). -/
+theorem goLeft2_halted_false_left (a b k : Nat) (t : Tape) (hk : k ≤ a) (hr : t.right ≠ []) :
+    (goLeft2 a b).halted ((goLeft2 a b).run k ⟨(goLeft2 a b).start, t⟩) = false := by
+  -- 左段运行：状态 `castAdd ⟨k⟩`、纸带左移 `k` 次
+  have hnh : ∀ j, j < k → (goLeft a).halted ((goLeft a).run j ⟨(goLeft a).start, t⟩) = false := by
+    intro j hj
+    rw [show (goLeft a).start = (⟨0, by omega⟩ : Fin (a + 1)) from rfl]
+    rw [goLeft_run_from a j 0 t (by omega) hr]
+    exact goLeft_halted_false a (0 + j) (by omega) (moveLeftN j t)
+  have hrun : (goLeft2 a b).run k ⟨(goLeft2 a b).start, t⟩
+      = ⟨Fin.castAdd (b + 1) ((goLeft a).run k ⟨(goLeft a).start, t⟩).state,
+         ((goLeft a).run k ⟨(goLeft a).start, t⟩).tape⟩ :=
+    seqComp_embed_left (goLeft a) (goLeft b) k ⟨(goLeft a).start, t⟩ hnh
+  rw [hrun]
+  -- 组合机的接受/拒绝都在右侧，左侧状态必不停机
+  have h1 := (seqComp_halt_castAdd (goLeft a) (goLeft b)
+    ((goLeft a).run k ⟨(goLeft a).start, t⟩).state).1
+  have h2 := (seqComp_halt_castAdd (goLeft a) (goLeft b)
+    ((goLeft a).run k ⟨(goLeft a).start, t⟩).state).2
+  exact halted_false_of_ne (goLeft2 a b) _ h1.symm h2.symm
+
 end DTM
 
 end Pnp
