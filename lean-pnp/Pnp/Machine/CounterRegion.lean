@@ -1000,6 +1000,8 @@ theorem segInc_erase_run (B : Nat) :
         (List.replicate n (some true) ++ a₀ :: L) (a :: R)]
       rw [ih a₀ ha₀ L none (by simp) (a :: R)]
       rw [List.cons_append]
+      rw [replicate_succ_append (n + 1) none (a :: R)]
+      rw [List.cons_append]
 
 /-- **单段加一（完成）**：段长 `d` 且 `d + 1 < B` ⇒ `d + 1` 步后段长 `d ↦ d + 1`、进完成态。
     Segment increment (done): the run length goes `d ↦ d + 1`. -/
@@ -1041,13 +1043,24 @@ theorem segInc_run_carry (B k : Nat) (hk : k + 2 = B) (a₀ : Sym) (ha₀ : a₀
   simp only [Nat.zero_add]
   rw [show k + 3 = 1 + (k + 2) from by omega]
   rw [DTM.run_add (segInc B) 1 (k + 2)]
-  rw [List.replicate_succ]
+  -- 把计数终态的 `replicate (k+1)` 重述成「一格 + 余段」的写法（定义等价）
+  show (segInc B).run (k + 2)
+      ((segInc B).run 1 (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
+        (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R)))) =
+    ⟨(⟨B + 3, by omega⟩ : Fin (B + 4)),
+      Tape.mk L (a₀ :: List.replicate (k + 1) none ++ none :: R)⟩
   rw [run_one_stp (segInc B)
     (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
-      (Tape.mk (some true :: (List.replicate k (some true) ++ a₀ :: L)) (none :: R)))
+      (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R)))
     (segInc_halted_false B (k + 1) (by omega) (by omega) (by omega) _)]
-  rw [segInc_decide_carry B (k + 1) (by omega) (by omega) (by omega)
-    (some true) none (by simp) (List.replicate k (some true) ++ a₀ :: L) R]
+  have hstep : (segInc B).stepConfig
+      (Config.mk (⟨k + 1, by omega⟩ : Fin (B + 4))
+        (Tape.mk ((some true :: List.replicate k (some true)) ++ a₀ :: L) (none :: R))) =
+      Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4))
+        (Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: none :: R)) :=
+    segInc_decide_carry B (k + 1) (by omega) (by omega) (by omega)
+      (some true) none (by simp) (List.replicate k (some true) ++ a₀ :: L) R
+  rw [hstep]
   rw [show k + 2 = (k + 1) + 1 from by omega]
   rw [DTM.run_add (segInc B) (k + 1) 1]
   rw [segInc_erase_run B k a₀ ha₀ L none (by simp) R]
@@ -1055,6 +1068,7 @@ theorem segInc_run_carry (B k : Nat) (hk : k + 2 = B) (a₀ : Sym) (ha₀ : a₀
     (Config.mk (⟨B + 1, by omega⟩ : Fin (B + 4))
       (Tape.mk L (a₀ :: List.replicate (k + 1) none ++ none :: R)))
     (segInc_halted_false B (B + 1) (by omega) (by omega) (by omega) _)]
+  rw [List.cons_append]
   rw [segInc_erase_stop B a₀ ha₀ L (List.replicate (k + 1) none ++ none :: R)]
 
 end DTM
