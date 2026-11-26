@@ -196,10 +196,10 @@ theorem seqComp_run_natAdd (A : DTM q) (B : DTM q') (m : Nat) (c : Config q') :
         have hC : (seqComp A B).halted ⟨Fin.natAdd q c.state, c.tape⟩ = true := by
           apply halted_of_accept_or_reject
           rcases hx with h | h
-          · exact Or.inl (by rw [h])
-          · exact Or.inr (by rw [h])
+          · exact Or.inl (by show Fin.natAdd q c.state = Fin.natAdd q B.accept; rw [h])
+          · exact Or.inr (by show Fin.natAdd q c.state = Fin.natAdd q B.reject; rw [h])
         rw [hC]
-        simp only [if_true]
+        simp only [ite_true]
         rw [run_of_halted B c hh (m + 1)]
       · -- B 未停机：组合机也未停机，两边各走一步
         have hx : B.halted c = false := by
@@ -217,11 +217,11 @@ theorem seqComp_run_natAdd (A : DTM q) (B : DTM q') (m : Nat) (c : Config q') :
           rw [this] at hx
           exact Bool.noConfusion hx
         have hC : (seqComp A B).halted ⟨Fin.natAdd q c.state, c.tape⟩ = false := by
-          have ha := (seqComp_halt_natAdd A B c.state h1 h2).1
-          have hr := (seqComp_halt_natAdd A B c.state h1 h2).2
-          simp [DTM.halted, ha, hr]
+          rw [DTM.halted, Bool.or_eq_false_iff]
+          exact ⟨beq_eq_false_iff_ne.mpr (Ne.symm (seqComp_halt_natAdd A B c.state h1 h2).1),
+            beq_eq_false_iff_ne.mpr (Ne.symm (seqComp_halt_natAdd A B c.state h1 h2).2)⟩
         rw [hC]
-        simp only [Bool.false_eq_true, if_false]
+        simp only [Bool.false_eq_true, ite_false]
         have hstep : (seqComp A B).stepConfig ⟨Fin.natAdd q c.state, c.tape⟩
             = ⟨Fin.natAdd q (B.stepConfig c).state, (B.stepConfig c).tape⟩ := by
           simp only [DTM.stepConfig, seqComp_step_natAdd A B c.state c.tape.read]
