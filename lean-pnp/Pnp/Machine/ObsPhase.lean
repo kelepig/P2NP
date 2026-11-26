@@ -198,6 +198,262 @@ theorem obsPhase_run_escape (q b : Nat) (M : NTM q) :
       from rfl, Tape.write_read _ hr]
   rfl
 
+/-! ## 预算层桥接：`simObs` 的终点决定 `obsPhase` 的终点 -/
+
+/-- 失败哨兵与接受哨兵不同。 The fail and accept sentinels differ. -/
+theorem obsFail_ne_obsAccO (q b : Nat) : obsFail q b ≠ obsAcc q b := by
+  intro hh
+  have hv := congrArg Fin.val hh
+  rw [show (obsFail q b).val = stateCountD q b + 1 from rfl,
+    show (obsAcc q b).val = stateCountD q b from rfl] at hv
+  omega
+
+/-- 哨兵状态（状态号 ≥ 驱动空间）上 `simObs` 原地停留。
+    On a sentinel state `simObs` stays put. -/
+theorem simObs_step_outer (q b : Nat) (M : NTM q) (s : Fin (stateCountO q b))
+    (hge : ¬ s.val < stateCountD q b) (a : Sym) :
+    (simObs q b M).step s a = (s, a, Dir.stay) := by
+  simp only [simObs]
+  rw [dite_eq_right hge]
+
+/-- 失败哨兵上的单步：状态仍是失败哨兵。 The fail sentinel is fixed by its own step. -/
+theorem simObs_fail_step_fst (q b : Nat) (M : NTM q) (a : Sym) :
+    ((simObs q b M).step (obsFail q b) a).1 = obsFail q b := by
+  rw [simObs_step_outer q b M (obsFail q b)
+    (by show ¬ (stateCountD q b + 1 < stateCountD q b); omega)]
+
+/-- 逃生态是停机态（拒绝）。 The escape state halts (reject). -/
+theorem obsPhase_halted_esc (q b : Nat) (M : NTM q) (t : Tape) :
+    (obsPhase q b M).halted ⟨obsEsc q b, t⟩ = true :=
+  halted_of_accept_or_reject (obsPhase q b M) _ (Or.inr rfl)
+
+/-- **逃逸一步后冻结**：若格局已在失败哨兵处，则 `obsPhase` 在 `n+1` 步后停在逃生态，
+    纸带为「写入原符号并停留」后的形态（无需右侧非空前提）。
+    Escaping then freezing: from a config at the fail sentinel, `obsPhase` sits at the escape
+    state after `n+1` steps, with the unchanged-write tape form. -/
+theorem obsPhase_escape_once (q b : Nat) (M : NTM q) (c : Config (stateCountO q b))
+    (hc : c.state = obsFail q b) (n : Nat) :
+    (obsPhase q b M).run (n + 1) ⟨embOb q b c.state, c.tape⟩ =
+      ⟨obsEsc q b, (c.tape.write c.tape.read).move Dir.stay⟩ := by
+  have hnhO : (obsPhase q b M).halted ⟨embOb q b c.state, c.tape⟩ = false := by
+    refine obsPhase_halted_inner q b M c.state ?_ c.tape
+    intro hacc
+    exact obsFail_ne_obsAccO q b (hc.symm.trans hacc)
+  have hone : (obsPhase q b M).run 1 ⟨embOb q b c.state, c.tape⟩ =
+      ⟨obsEsc q b, (c.tape.write c.tape.read).move Dir.stay⟩ := by
+    show (obsPhase q b M).run (0 + 1)
+        ⟨embOb q b c.state, c.tape⟩
+      = ⟨obsEsc q b, (c.tape.write c.tape.read).move Dir.stay⟩
+    rw [DTM.run_succ_of_not_halted (obsPhase q b M) 0 _ hnhO]
+    unfold DTM.stepConfig
+    rw [obsPhase_step_escape q b M c.state c.tape.read
+      (by rw [hc]; exact simObs_fail_step_fst q b M c.tape.read)]
+    dsimp only
+    rfl
+  rw [show n + 1 = 1 + n from Nat.add_comm n 1, DTM.run_add (obsPhase q b M) 1 n, hone]
+  exact run_of_halted (obsPhase q b M) _ (obsPhase_halted_esc q b M _) n
+
+/-- **预算内接受 ⇒ 运行相位机接受**：`simObs` 跑 `K` 步停在接受哨兵 ⇒ `obsPhase`
+    同样跑 `K` 步停在接受态，纸带相同。
+    Budget accept: if `simObs` ends at the accept sentinel after `K` steps, so does `obsPhase`
+    (same tape). -/
+theorem obsPhase_budget_accept (q b : Nat) (M : NTM q) :
+    ∀ (K : Nat) (c : Config (stateCountO q b)),
+      ((simObs q b M).run K c).state = obsAcc q b →
+      (obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩ =
+        ⟨embOb q b (obsAcc q b), ((simObs q b M).run K c).tape⟩ := by
+  intro K
+  induction K with
+  | zero =>
+      intro c h
+      rw [show (simObs q b M).run 0 c = c from rfl] at h
+      rw [h]
+      rfl
+  | succ K ih =>
+      intro c h
+      by_cases hh : (simObs q b M).halted c = true
+      · -- 已停机：两边都冻结在 `c`
+        have hc : c.state = obsAcc q b := by
+          rw [run_of_halted (simObs q b M) c hh] at h
+          exact h
+        have hO : (obsPhase q b M).halted ⟨embOb q b c.state, c.tape⟩ = true := by
+          rw [hc]
+          exact halted_of_accept_or_reject (obsPhase q b M) _ (Or.inl rfl)
+        rw [run_of_halted (simObs q b M) c hh,
+          run_of_halted (obsPhase q b M) ⟨embOb q b c.state, c.tape⟩ hO, hc]
+      · have hnh : (simObs q b M).halted c = false := by
+          cases hv : (simObs q b M).halted c with
+          | false => rfl
+          | true => exact absurd hv hh
+        have hK : ((simObs q b M).run (K + 1) c).state =
+            ((simObs q b M).run K ((simObs q b M).stepConfig c)).state := by
+          rw [DTM.run_succ_of_not_halted (simObs q b M) K c hnh]
+        -- 第 K 步的转移结果不是失败哨兵（否则终点状态是失败哨兵）
+        have hstep : ((simObs q b M).step c.state c.tape.read).1 ≠ obsFail q b := by
+          intro heq
+          have hst : ((simObs q b M).stepConfig c).state = obsFail q b := by
+            rw [stepConfig_state]
+            exact heq
+          have hnot : (simObs q b M).halted ((simObs q b M).stepConfig c) = true :=
+            halted_of_accept_or_reject (simObs q b M) _ (Or.inr hst)
+          have hcontra : ((simObs q b M).run K ((simObs q b M).stepConfig c)).state
+              = obsFail q b := by
+            rw [run_of_halted (simObs q b M) _ hnot]
+            exact hst
+          exact obsFail_ne_obsAccO q b (hcontra.symm.trans (hK ▸ h))
+        have hnhO : (obsPhase q b M).halted ⟨embOb q b c.state, c.tape⟩ = false := by
+          refine obsPhase_halted_inner q b M c.state ?_ c.tape
+          intro hacc
+          exact hh (halted_of_accept_or_reject (simObs q b M) c (Or.inl hacc))
+        rw [DTM.run_succ_of_not_halted (simObs q b M) K c hnh,
+          DTM.run_succ_of_not_halted (obsPhase q b M) K ⟨embOb q b c.state, c.tape⟩ hnhO,
+          obsPhase_stepConfig_copy q b M c hstep]
+        exact ih ((simObs q b M).stepConfig c) (hK ▸ h)
+
+/-- **格局投影**：`obsPhase` 第 `K` 步的格局要么与 `simObs` 完全一致（状态嵌入、纸带相同），
+    要么已逃逸（此时 `simObs` 停在失败哨兵）。
+    Config projection: after `K` steps `obsPhase` either matches `simObs` exactly (embedded
+    state, same tape) or has escaped — and escaping only happens once `simObs` sits at the
+    fail sentinel. -/
+theorem obsPhase_run_config_proj (q b : Nat) (M : NTM q) :
+    ∀ (K : Nat) (c : Config (stateCountO q b)),
+      (obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩
+          = ⟨embOb q b ((simObs q b M).run K c).state, ((simObs q b M).run K c).tape⟩
+      ∨ (((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state = obsEsc q b ∧
+         ((simObs q b M).run K c).state = obsFail q b) := by
+  intro K
+  induction K with
+  | zero =>
+      intro c
+      exact Or.inl rfl
+  | succ K ih =>
+      intro c
+      rcases ih c with hleft | ⟨hright, hfailK⟩
+      · by_cases hacc : ((simObs q b M).run K c).state = obsAcc q b
+        · -- 接受哨兵：两边冻结
+          have hs : (simObs q b M).run (K + 1) c = (simObs q b M).run K c :=
+            DTM.run_add (simObs q b M) K 1 c ▸
+              run_of_halted (simObs q b M) _ (halted_of_accept_or_reject (simObs q b M) _
+                (Or.inl hacc)) 1
+          have hO : (obsPhase q b M).halted
+              ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) = true := by
+            rw [hleft]
+            exact halted_of_accept_or_reject (obsPhase q b M) _
+              (Or.inl (by rw [hacc]; rfl))
+          have ho : (obsPhase q b M).run (K + 1) ⟨embOb q b c.state, c.tape⟩ =
+              (obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩ :=
+            DTM.run_add (obsPhase q b M) K 1 _ ▸
+              run_of_halted (obsPhase q b M) _ hO 1
+          rw [ho, hs]
+          exact Or.inl hleft
+        · by_cases hfail : ((simObs q b M).run K c).state = obsFail q b
+          · -- 失败哨兵：一步逃逸
+            have hnhO : (obsPhase q b M).halted
+                ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) = false := by
+              rw [hleft]
+              exact obsPhase_halted_inner q b M _ (by rw [hfail]; exact obsFail_ne_obsAccO q b) _
+            have hesc : (obsPhase q b M).run 1
+                ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) =
+                ⟨obsEsc q b, (((simObs q b M).run K c).tape.write
+                  ((simObs q b M).run K c).tape.read).move Dir.stay⟩ := by
+              show (obsPhase q b M).run (0 + 1) _ = _
+              rw [DTM.run_succ_of_not_halted (obsPhase q b M) 0 _ hnhO]
+              unfold DTM.stepConfig
+              rw [hleft, obsPhase_step_escape q b M _ _
+                (by rw [hfail]; exact simObs_fail_step_fst q b M _)]
+              dsimp only
+              rfl
+            have hs : (simObs q b M).run (K + 1) c = (simObs q b M).run K c :=
+              DTM.run_add (simObs q b M) K 1 c ▸
+                run_of_halted (simObs q b M) _ (halted_of_accept_or_reject (simObs q b M) _
+                  (Or.inr hfail)) 1
+            rw [DTM.run_add (obsPhase q b M) K 1, hesc, hs]
+            exact Or.inr ⟨rfl, hfail⟩
+          · -- 普通状态：一步照抄或一步逃逸
+            have hnhS : (simObs q b M).halted ((simObs q b M).run K c) = false :=
+              simObs_halted_of_ne q b M _ hacc hfail
+            have hs : (simObs q b M).run (K + 1) c =
+                (simObs q b M).stepConfig ((simObs q b M).run K c) :=
+              run_succ_last (simObs q b M) K c hnhS
+            have hnhO : (obsPhase q b M).halted
+                ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) = false := by
+              rw [hleft]
+              exact obsPhase_halted_inner q b M _ hacc _
+            by_cases heq : ((simObs q b M).step ((simObs q b M).run K c).state
+                ((simObs q b M).run K c).tape.read).1 = obsFail q b
+            · have hesc : (obsPhase q b M).run 1
+                  ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) =
+                  ⟨obsEsc q b, (((simObs q b M).run K c).tape.write
+                    ((simObs q b M).run K c).tape.read).move Dir.stay⟩ := by
+                show (obsPhase q b M).run (0 + 1) _ = _
+                rw [DTM.run_succ_of_not_halted (obsPhase q b M) 0 _ hnhO]
+                unfold DTM.stepConfig
+                rw [hleft, obsPhase_step_escape q b M _ _ heq]
+                dsimp only
+                rfl
+              have hs2 : ((simObs q b M).run (K + 1) c).state = obsFail q b := by
+                rw [hs, stepConfig_state]
+                exact heq
+              rw [DTM.run_add (obsPhase q b M) K 1, hesc]
+              exact Or.inr ⟨rfl, hs2⟩
+            · have hcopy := obsPhase_stepConfig_copy q b M ((simObs q b M).run K c) heq
+              have hone : (obsPhase q b M).run 1
+                  ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) =
+                  (obsPhase q b M).stepConfig
+                    ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) := by
+                show (obsPhase q b M).run (0 + 1) _ = _
+                rw [DTM.run_succ_of_not_halted (obsPhase q b M) 0 _ hnhO]
+                rfl
+              rw [DTM.run_add (obsPhase q b M) K 1, hone, hleft, hcopy, hs]
+              exact Or.inl rfl
+      · -- 已逃逸：逃生态停机，永不离开
+        have hO : (obsPhase q b M).halted
+            ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩) = true :=
+          halted_of_accept_or_reject (obsPhase q b M) _ (Or.inr (by rw [hright]; rfl))
+        have ho : (obsPhase q b M).run (K + 1) ⟨embOb q b c.state, c.tape⟩ =
+            (obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩ :=
+          DTM.run_add (obsPhase q b M) K 1 _ ▸ run_of_halted (obsPhase q b M) _ hO 1
+        have hs : ((simObs q b M).run (K + 1) c).state = obsFail q b := by
+          rw [DTM.run_add (simObs q b M) K 1,
+            run_of_halted (simObs q b M) _
+              (halted_of_accept_or_reject (simObs q b M) _ (Or.inr hfailK))]
+          exact hfailK
+        rw [ho, hs]
+        exact Or.inr ⟨hright, rfl⟩
+
+/-- **接受 ⇔ 观察机接受**（预算层）：`obsPhase` 跑 `K` 步停在接受态，当且仅当 `simObs`
+    跑 `K` 步停在接受哨兵。
+    Budget-level equivalence: `obsPhase` accepts after `K` steps iff `simObs` does. -/
+theorem obsPhase_accept_iff (q b : Nat) (M : NTM q) (K : Nat)
+    (c : Config (stateCountO q b)) :
+    ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state
+        = (obsPhase q b M).accept
+      ↔ ((simObs q b M).run K c).state = obsAcc q b := by
+  constructor
+  · intro h
+    rcases obsPhase_run_config_proj q b M K c with hl | ⟨hr, _⟩
+    · have hst : ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state
+          = embOb q b ((simObs q b M).run K c).state := congrArg Config.state hl
+      have hv : embOb q b ((simObs q b M).run K c).state = (obsPhase q b M).accept :=
+        hst.symm.trans h
+      have hv2 := congrArg Fin.val hv
+      have hv3 : ((simObs q b M).run K c).state.val = (obsAcc q b).val := hv2
+      exact Fin.ext hv3
+    · exfalso
+      rw [hr] at h
+      have hv := congrArg Fin.val h
+      rw [show (obsEsc q b).val = stateCountO q b from rfl,
+        show (obsPhase q b M).accept.val = stateCountD q b from rfl] at hv
+      unfold stateCountO at hv
+      omega
+  · intro h
+    rcases obsPhase_run_config_proj q b M K c with hl | ⟨hr, hf⟩
+    · rw [hl, h]
+      rfl
+    · exfalso
+      rw [h] at hf
+      exact obsFail_ne_obsAccO q b hf.symm
+
 end DTM
 
 end Pnp
