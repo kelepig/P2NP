@@ -14,6 +14,7 @@
   Layout (head-outward): `[marker false][true^i][consumed blanks…][written digit area…]`.
 -/
 
+import Pnp.Machine.DigitShape
 import Pnp.Machine.WalkLT
 
 namespace Pnp
@@ -537,6 +538,102 @@ theorem consumeTrue_run (B k : Nat) (hk : k + 1 ≤ B) (a₀ : Sym) (h₀ : a₀
   have h := consumeTrue_run_aux B k 0 h1 h2 (by omega) a₀ h₀ L R
   simp only [Nat.zero_add] at h
   exact h
+
+/-! ### 块写出：按状态里的计数值写出 `some false :: true^m`（左向写出） -/
+
+/-- **块写出机**：入口状态 = 待写真格数 `m`；每步在头格写真格并左移（状态减一），
+    状态归 0 时在头格写 `some false` 并右移一格停机。左向写出的物理顺序正好是
+    `false :: true^m`，即 `blockCode` 的形状（`m = c + 2` 时就是 `blockCode c`）。
+    Block writer: entered with state = number `m` of true cells to write; each step writes
+    one true cell and moves left (state − 1), and at state 0 it writes `some false` and moves
+    right, halting. Writing leftward yields `false :: true^m` physically — the `blockCode` shape. -/
+def writeBlock (B : Nat) : DTM (B + 4) where
+  step := fun s a =>
+    if h : s.val = 0 then (⟨B + 3, by omega⟩, some false, Dir.right)
+    else (⟨s.val - 1, by omega⟩, some true, Dir.left)
+  start := 0
+  accept := ⟨B + 3, by omega⟩
+  reject := ⟨B + 3, by omega⟩
+
+/-- 非终止状态（≠ `B+3`）不停机。 States other than `B+3` never halt. -/
+theorem writeBlock_halted_false (B : Nat) (st : Nat) (hst : st < B + 4) (h : st ≠ B + 3)
+    (t : Tape) : (writeBlock B).halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (writeBlock B).accept.val = B + 3 from rfl] at hv
+    exact h hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (writeBlock B).reject.val = B + 3 from rfl] at hv
+    exact h hv
+
+/-- 计数步：头格改写为真格、左移、状态减一。 Counting step: write one true cell, move left. -/
+theorem writeBlock_step_true (B st : Nat) (hs : st < B + 4) (h0 : st ≠ 0)
+    (x : Sym) (L R : List Sym) :
+    (writeBlock B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 4)) (Tape.mk (x :: L) R)) =
+      Config.mk (⟨st - 1, by omega⟩ : Fin (B + 4))
+        (Tape.mk L (x :: some true :: R.tail)) := by
+  simp only [DTM.stepConfig, writeBlock, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rw [dif_neg h0]
+
+/-- 收尾步：状态 0 时头格写 `some false` 并右移停机。 Final step: write `some false`, move right. -/
+theorem writeBlock_step_false (B st : Nat) (hs : st < B + 4) (h0 : st = 0)
+    (L R : List Sym) :
+    (writeBlock B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 4)) (Tape.mk L R)) =
+      Config.mk (⟨B + 3, by omega⟩ : Fin (B + 4)) (Tape.mk (some false :: L) R.tail) := by
+  simp only [DTM.stepConfig, writeBlock, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rw [dif_pos h0]
+
+/-- **块写出整段**：入口状态 `m`、`m + 1` 步后写出 `some false :: replicate m true`，
+    头停在该块第一个真格上；左侧恰好消费 `m` 格、右侧尾部 `R₀.tail` 原样保留。
+    Block writer run: entry state `m` yields the block `false :: true^m` in `m + 1` steps. -/
+theorem writeBlock_run (B : Nat) :
+    ∀ (m : Nat) (hm : m ≤ B + 2) (L₀ R₀ : List Sym), m ≤ L₀.length →
+      (writeBlock B).run (m + 1)
+        ⟨(⟨m, by omega⟩ : Fin (B + 4)), Tape.mk L₀ R₀⟩ =
+      ⟨(⟨B + 3, by omega⟩ : Fin (B + 4)),
+        Tape.mk (some false :: L₀.drop m) (List.replicate m (some true) ++ R₀.tail)⟩
+  | 0, hm, L₀, R₀, hlen => by
+      rw [Nat.zero_add]
+      rw [run_one_stp (writeBlock B)
+        (Config.mk (⟨(0 : Nat), by omega⟩ : Fin (B + 4)) (Tape.mk L₀ R₀))
+        (writeBlock_halted_false B 0 (by omega) (by omega) (Tape.mk L₀ R₀))]
+      rw [writeBlock_step_false B 0 (by omega) rfl L₀ R₀]
+      rfl
+  | m + 1, hm, L₀, R₀, hlen => by
+      obtain ⟨x, L₁, hL⟩ : ∃ (x : Sym) (L₁ : List Sym), L₀ = x :: L₁ := by
+        cases L₀ with
+        | nil => simp at hlen
+        | cons x L₁ => exact ⟨x, L₁, rfl⟩
+      subst hL
+      simp only [List.length_cons] at hlen
+      rw [show m + 1 + 1 = 1 + (m + 1) from by omega]
+      rw [DTM.run_add (writeBlock B) 1 (m + 1)]
+      rw [run_one_stp (writeBlock B)
+        (Config.mk (⟨(m + 1 : Nat), by omega⟩ : Fin (B + 4)) (Tape.mk (x :: L₁) R₀))
+        (writeBlock_halted_false B (m + 1) (by omega) (by omega) (Tape.mk (x :: L₁) R₀))]
+      rw [writeBlock_step_true B (m + 1) (by omega) (by omega) x L₁ R₀]
+      simp only [show m + 1 - 1 = m from by omega]
+      rw [writeBlock_run B m (by omega) L₁ (x :: some true :: R₀.tail) (by omega)]
+      rw [List.drop_succ_cons, List.tail_cons, replicate_succ_append]
+
+/-- **写出一整块 `blockCode c`**：入口状态 = `c + 2`（真格数），`c + 3` 步后物理上得到
+    `some false :: true^(c+2)`（即 `blockCode c`：`false` 在最左、头停在块内第一个真格上）。
+    Writing the whole block `blockCode c`: entry state `c + 2`, done in `c + 3` steps. -/
+theorem writeBlock_run_blockCode (B c : Nat) (hc : c ≤ B) (L₀ R₀ : List Sym)
+    (hlen : c + 2 ≤ L₀.length) :
+    (writeBlock B).run (c + 3)
+        ⟨(⟨c + 2, by omega⟩ : Fin (B + 4)), Tape.mk L₀ R₀⟩ =
+      ⟨(⟨B + 3, by omega⟩ : Fin (B + 4)),
+        Tape.mk (some false :: L₀.drop (c + 2))
+          (List.replicate (c + 2) (some true) ++ R₀.tail)⟩ :=
+  writeBlock_run B (c + 2) (by omega) L₀ R₀ hlen
 
 end DTM
 
