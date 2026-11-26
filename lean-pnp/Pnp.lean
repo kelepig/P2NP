@@ -101,6 +101,7 @@ import Pnp.Machine.RegionAlgebra
 import Pnp.Machine.ExpandEnc
 import Pnp.Machine.PadRegion
 import Pnp.Machine.ExpandInit
+import Pnp.Machine.UnaryArith
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
