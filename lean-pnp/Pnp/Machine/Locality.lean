@@ -250,4 +250,144 @@ theorem run_accept_agree (M : DTM q) (K : Nat) (c1 c2 : Config q)
 
 end DTM
 
+
+/-! ## 左副本绝缘：远端左尾不影响运行（头不触底的条件下） -/
+
+namespace Tape
+
+/-- `t2` 是 `t1` 在**远端左侧**追加一段尾巴后的纸带：右侧完全相同，左侧多出一段。
+    `t2` is `t1` with an extra far-left tail; the head-side (right) parts agree exactly. -/
+def PadLeft (t1 t2 : Tape) : Prop :=
+  t2.right = t1.right ∧ ∃ C : List Sym, t2.left = t1.left ++ C
+
+/-- 左副本绝缘下读数相同。 Under a left tail the read symbol is unchanged. -/
+theorem padLeft_read {t1 t2 : Tape} (h : PadLeft t1 t2) : t1.read = t2.read := by
+  obtain ⟨hr, _⟩ := h
+  rw [read, read, hr]
+
+/-- 同符号写入保持左副本绝缘。 Writing preserves a left tail. -/
+theorem padLeft_write {t1 t2 : Tape} (h : PadLeft t1 t2) (s : Sym) :
+    PadLeft (t1.write s) (t2.write s) := by
+  obtain ⟨hr, C, hl⟩ := h
+  refine ⟨?_, C, ?_⟩
+  · show s :: t2.right.tail = s :: t1.right.tail
+    rw [hr]
+  · show t2.left = t1.left ++ C
+    exact hl
+
+/-- 右移保持左副本绝缘。 A right move preserves a left tail. -/
+theorem padLeft_moveRight {t1 t2 : Tape} (h : PadLeft t1 t2) :
+    PadLeft t1.moveRight t2.moveRight := by
+  obtain ⟨hr, C, hl⟩ := h
+  obtain ⟨l1, r1⟩ := t1
+  obtain ⟨l2, r2⟩ := t2
+  simp only at hr hl
+  subst hl
+  subst hr
+  cases r2 with
+  | nil => simp only [moveRight]; exact ⟨rfl, C, by simp⟩
+  | cons x xs => simp only [moveRight]; exact ⟨rfl, C, by simp⟩
+
+/-- 左移保持左副本绝缘（前提：理想纸带左侧非空）。
+    A left move preserves a left tail provided the ideal tape still has a left cell. -/
+theorem padLeft_moveLeft {t1 t2 : Tape} (h : PadLeft t1 t2) (hne : t1.left ≠ []) :
+    PadLeft t1.moveLeft t2.moveLeft := by
+  obtain ⟨hr, C, hl⟩ := h
+  obtain ⟨l1, r1⟩ := t1
+  obtain ⟨l2, r2⟩ := t2
+  simp only at hr hl
+  subst hl
+  subst hr
+  cases l1 with
+  | nil => exact absurd rfl hne
+  | cons x xs =>
+      simp only [moveLeft]
+      exact ⟨rfl, C, by simp⟩
+
+/-- 同方向移动保持左副本绝缘（左移需要理想纸带左侧非空）。
+    Moving the same way preserves a left tail (the left move needs a nonempty left cell). -/
+theorem padLeft_move {t1 t2 : Tape} (h : PadLeft t1 t2) (d : Dir) (hne : t1.left ≠ []) :
+    PadLeft (t1.move d) (t2.move d) := by
+  cases d with
+  | left => exact padLeft_moveLeft h hne
+  | right =>
+      show PadLeft t1.moveRight t2.moveRight
+      exact padLeft_moveRight h
+  | stay =>
+      show PadLeft t1 t2
+      exact h
+
+end Tape
+
+namespace DTM
+
+variable {q : Nat}
+
+/-- 停机判定只依赖状态。 Halting depends only on the state. -/
+theorem halted_congr (M : DTM q) {c1 c2 : Config q} (hs : c1.state = c2.state) :
+    M.halted c1 = M.halted c2 := by
+  unfold DTM.halted
+  rw [hs]
+
+/-- 一步保持左副本绝缘（且状态保持相等）。
+    One step preserves left-tail insulation and state equality. -/
+theorem step_padLeft (M : DTM q) {c1 c2 : Config q}
+    (hs : c1.state = c2.state) (hP : Tape.PadLeft c1.tape c2.tape)
+    (hne : c1.tape.left ≠ []) :
+    (M.stepConfig c1).state = (M.stepConfig c2).state ∧
+      Tape.PadLeft (M.stepConfig c1).tape (M.stepConfig c2).tape := by
+  have hr : c1.tape.read = c2.tape.read := Tape.padLeft_read hP
+  have hstep : M.step c1.state c1.tape.read = M.step c2.state c2.tape.read := by
+    rw [hs, hr]
+  refine ⟨?_, ?_⟩
+  · rw [stepConfig_state, stepConfig_state, hstep]
+  · unfold DTM.stepConfig
+    rw [hstep]
+    exact Tape.padLeft_move (Tape.padLeft_write hP _) _ hne
+
+/-- **左副本绝缘主定理**：两张纸带只差远端左尾（右侧完全相同），状态相同，且理想纸带
+    前 `k` 步的左侧始终非空 ⇒ 跑 `k` 步后状态相同。
+    Left-tail insulation: a far-left tail never changes the state trajectory, provided the
+    ideal tape keeps a nonempty left cell throughout. -/
+theorem run_state_eq_of_padLeft (M : DTM q) (k : Nat) :
+    ∀ (c1 c2 : Config q), c1.state = c2.state →
+      Tape.PadLeft c1.tape c2.tape →
+      (∀ j, j < k → (M.run j c1).tape.left ≠ []) →
+      (M.run k c1).state = (M.run k c2).state := by
+  induction k with
+  | zero =>
+      intro c1 c2 hs _ _
+      exact hs
+  | succ K ih =>
+      intro c1 c2 hs hP hne
+      by_cases hc : M.halted c1 = true
+      · -- 已停机：两边都冻结
+        have hc2 : M.halted c2 = true := by rw [← halted_congr M hs]; exact hc
+        rw [run_of_halted M c1 hc (K + 1), run_of_halted M c2 hc2 (K + 1)]
+        exact hs
+      · -- 未停机：两边各走一步
+        have hc0 : M.halted c1 = false := by
+          cases h : M.halted c1 with
+          | false => rfl
+          | true => exact absurd h hc
+        have hc2 : M.halted c2 = false := by rw [← halted_congr M hs]; exact hc0
+        rw [run_succ_of_not_halted M K c1 hc0, run_succ_of_not_halted M K c2 hc2]
+        have hstep := step_padLeft M hs hP (hne 0 (by omega))
+        have hne' : ∀ j, j < K → (M.run j (M.stepConfig c1)).tape.left ≠ [] := by
+          intro j hj
+          have h1 := hne (j + 1) (by omega)
+          rw [run_succ_of_not_halted M j c1 hc0] at h1
+          exact h1
+        exact ih (M.stepConfig c1) (M.stepConfig c2) hstep.1 hstep.2 hne'
+
+/-- **判定级推论（左副本绝缘）**：跑满 `k` 步后接受与否相同。
+    Verdict corollary for left-tail insulation. -/
+theorem run_accept_eq_of_padLeft (M : DTM q) (k : Nat) (c1 c2 : Config q)
+    (hs : c1.state = c2.state) (hP : Tape.PadLeft c1.tape c2.tape)
+    (hne : ∀ j, j < k → (M.run j c1).tape.left ≠ []) :
+    ((M.run k c1).state = M.accept ↔ (M.run k c2).state = M.accept) := by
+  rw [run_state_eq_of_padLeft M k c1 c2 hs hP hne]
+
+end DTM
+
 end Pnp
