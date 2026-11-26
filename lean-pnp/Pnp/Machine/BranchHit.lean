@@ -73,6 +73,46 @@ theorem exists_branch_hit_of_acceptsWithin {q : Nat} (M : NTM q) {B : Nat}
   exact ⟨t, i, ht1, htT, hi,
     simObs_run_accept_at_budget q b ((M.stutter).haltNorm) n _ _ (by omega) hhit⟩
 
+/-- **分支族完备性（显式命中时刻版）**：与 `exists_branch_hit_of_acceptsWithin` 同条件，
+    但额外输出**命中时刻 `n` 及其多项式上界**（`n ≤ T'·costCap + 6`）。
+    E 机把这一时刻当作冻结时刻：右侧预留覆盖到 `n` 即可用
+    `run_accept_eq_at_budget_of_right_append` 把判据搬到实际纸带。
+    Same as the completeness lemma, but exposing the hit time `n` and its polynomial bound, so
+    E can use `n` as the freeze time for the right-tail verdict transfer. -/
+theorem exists_branch_hit_time_of_acceptsWithin {q : Nat} (M : NTM q) {B : Nat}
+    (hB : ∀ s a, (M.step s a).length ≤ B) (hBpos : 0 < B)
+    (w : List Bool) (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T)
+    (T' : Nat) (hTT : T ≤ T')
+    (Z : Nat) (x : Reg q) (hx : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
+    (hxacc : x.state ≠ M.accept)
+    (hacc : M.AcceptsWithin w T) :
+    ∃ (t i n : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      n ≤ T' * costCap x.pre.length Z T' (2 ^ b) + 6 ∧
+      ((simObs q b ((M.stutter).haltNorm)).run n
+        (obsStart q b (M.stutter) x x.state.val (seqHead B T i) Z x.state.isLt
+          (seqHead_lt_pow B t i b hBpos hbnd) (branchBlocks B t i))).state = obsAcc q b := by
+  obtain ⟨t, i, r, ht1, htT, hi, hpass, hracc⟩ :=
+    exists_pass_branchBlocks_of_acceptsWithin M hB hBpos w T b hbnd hT Z x hx hxw
+      hd1 hd2 hxacc hacc
+  have htpos : 0 < t := by omega
+  have hne : branchBlocks B t i ≠ [] := by
+    intro h
+    have hlen := branchBlocks_length B t i htpos
+    rw [h, List.length_nil] at hlen
+    omega
+  obtain ⟨n, hn, hhit⟩ :=
+    exists_obs_acc_of_passRun_accept q b (M.stutter) (branchBlocks B t i) hne
+      Z (seqHead B T i) (seqHead_lt_pow B t i b hBpos hbnd) x x.state.val x.state.isLt
+      rfl hx.1 hx.2 (branchBlocks_hb B t i b hBpos hbnd) r hpass hracc
+  have hblen : (branchBlocks B t i).length ≤ T' := by
+    rw [branchBlocks_length B t i htpos]
+    omega
+  have hsteps := passRun_steps_le_uniform q b ((M.stutter).haltNorm).step Z (seqHead B T i)
+    (seqHead_lt_pow B t i b hBpos hbnd) x (branchBlocks B t i)
+    (branchBlocks_hb B t i b hBpos hbnd) r hpass T' hblen
+  exact ⟨t, i, n, ht1, htT, hi, by omega, hhit⟩
+
 end DTM
 
 end Pnp
