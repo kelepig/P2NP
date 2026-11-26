@@ -138,3 +138,4 @@ import Pnp.TapeEncoding
 import Pnp.TapeEquiv
 import Pnp.Examples
 import Pnp.Problem
+import Pnp.Machine.BranchIndex
