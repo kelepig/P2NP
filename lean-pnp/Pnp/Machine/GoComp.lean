@@ -16,6 +16,7 @@
 import Pnp.Machine.Go
 import Pnp.Machine.SeqComp
 import Pnp.Machine.RegionBuild
+import Pnp.Machine.RegionAlgebra
 
 namespace Pnp
 
@@ -208,7 +209,7 @@ theorem markAlign_run (n : Nat) (t : Tape) (hr : t.right ≠ []) :
   obtain ⟨L, a, R, ht⟩ : ∃ L a R, moveLeftN n t = Tape.mk L (a :: R) := by
     obtain ⟨L, R⟩ := moveLeftN n t
     cases R with
-    | nil => exact absurd rfl hne
+    | nil => exfalso; exact hne rfl
     | cons a as => exact ⟨L, a, as, rfl⟩
   -- 左段不停机
   have hnhA : ∀ i, i < n → (goLeft n).halted ((goLeft n).run i ⟨(goLeft n).start, t⟩) = false := by
@@ -238,7 +239,10 @@ theorem markAlign_run (n : Nat) (t : Tape) (hr : t.right ≠ []) :
     The merged paper form matching the nested spec chain. -/
 theorem moveLeftN_split3 (a b : Nat) (t : Tape) :
     moveLeftN (a + (b + 1)) t = Tape.moveLeft (moveLeftN b (moveLeftN a t)) := by
-  rw [moveLeftN_add, moveLeftN_add]
+  rw [moveLeftN_add]
+  rw [show moveLeftN (b + 1) (moveLeftN a t)
+        = moveLeftN b (Tape.moveLeft (moveLeftN a t)) from rfl]
+  rw [moveLeftN_move]
 
 end DTM
 
