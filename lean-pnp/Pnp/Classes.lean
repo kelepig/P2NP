@@ -182,6 +182,20 @@ def AcceptsWithin (M : NTM q) (w : List Bool) (T : Nat) : Prop :=
   ∃ choices : List Nat, choices.length ≤ T ∧
     ∃ c : Config q, M.runWith T choices (M.init w) = some c ∧ c.state = M.accept
 
+/-- **起始态即接受态 ⇒ 任何输入在任何步数内都接受**（退化分支，E 的装配要单列）。
+    If the start state is accepting, every input is accepted within any number of steps. -/
+theorem acceptsWithin_of_start_accept (M : NTM q) (w : List Bool) (T : Nat)
+    (h : M.start = M.accept) : M.AcceptsWithin w T := by
+  refine ⟨[], by simp, M.init w, ?_, ?_⟩
+  · cases T with
+    | zero => rfl
+    | succ n =>
+        rw [runWith_succ]
+        have hh : M.halted (M.init w) = true := by
+          simp [halted, init, h]
+        rw [hh]
+  · exact h
+
 /-- 存在一条长度不超过 T 的选择序列，走到拒绝状态。 -/
 def RejectsWithin (M : NTM q) (w : List Bool) (T : Nat) : Prop :=
   ∃ choices : List Nat, choices.length ≤ T ∧
