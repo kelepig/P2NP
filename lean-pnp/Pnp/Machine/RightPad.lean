@@ -77,6 +77,39 @@ theorem run_accept_eq_of_padRight_enc (M : DTM q) (K : Nat) (st : Fin q) (x : Re
       (M.run K (Config.mk st t)).state = M.accept) := by
   rw [run_state_eq_of_padRight_enc M K st x L t hP h]
 
+/-- **停机后判定不变**：两个格局在第 `n` 步后状态相同且都已停机，则在任意更大预算 `K`
+    下接受判定相同（两边都冻结在原格局）。
+    Once both runs halt at the same state after `n` steps, the verdict at any larger budget is
+    the same. -/
+theorem run_accept_eq_of_halted_at (M : DTM q) (n K : Nat) (hn : n ≤ K)
+    (c1 c2 : Config q)
+    (hs : (M.run n c1).state = (M.run n c2).state)
+    (h1 : M.halted (M.run n c1) = true) :
+    ((M.run K c1).state = M.accept ↔ (M.run K c2).state = M.accept) := by
+  have h2 : M.halted (M.run n c2) = true := by
+    rw [← halted_congr M hs]
+    exact h1
+  have hK : K = n + (K - n) := by omega
+  have e1 : M.run K c1 = M.run n c1 := by
+    rw [hK, run_add, run_of_halted M _ h1]
+  have e2 : M.run K c2 = M.run n c2 := by
+    rw [hK, run_add, run_of_halted M _ h2]
+  rw [e1, e2, hs]
+
+/-- **冻结时刻的右尾判定搬运（区域版）**：实际纸带 = 理想区域编码 + 远端右尾；右侧预留
+    `≥ n`（冻结时刻）且理想运行在第 `n` 步已停机 ⇒ 任意更大预算 `K ≥ n` 下接受判定相同。
+    这是 E 机逐分支读判据的接口：预留只需**多项式**（覆盖到冻结时刻即可）。
+    Freeze-time verdict transfer: padding up to the freeze moment `n` suffices, and the
+    verdict persists to any larger budget. -/
+theorem run_accept_eq_at_budget_of_padRight_enc (M : DTM q) (n K : Nat) (hn : n ≤ K)
+    (st : Fin q) (x : Reg q) (L : List Sym) (t : Tape)
+    (hP : Tape.PadRight (Reg.enc x L) t) (h : n ≤ x.post.length)
+    (h1 : M.halted (M.run n (Config.mk st (Reg.enc x L))) = true) :
+    ((M.run K (Config.mk st (Reg.enc x L))).state = M.accept ↔
+      (M.run K (Config.mk st t)).state = M.accept) := by
+  refine run_accept_eq_of_halted_at M n K hn _ _ ?_ h1
+  exact run_state_eq_of_padRight_enc M n st x L t hP h
+
 end DTM
 
 end Pnp
