@@ -635,6 +635,120 @@ theorem writeBlock_run_blockCode (B c : Nat) (hc : c ≤ B) (L₀ R₀ : List Sy
           (List.replicate (c + 2) (some true) ++ R₀.tail)⟩ :=
   writeBlock_run B (c + 2) (by omega) L₀ R₀ hlen
 
+/-! ### 组计数：非破坏地数出 unary 组长度（计数值进状态） -/
+
+/-- **组计数机**：与 `consumeTrue` 同形，但**不擦除**——逐格左移、状态值加一，
+    读到非真格（分隔格）即原地吸收。用于把计数器寄存器「读出来」而不破坏它。
+    Group counter: like `consumeTrue` but non-destructive — the state value counts the true
+    cells passed, and the machine becomes a fixed point on the first non-true cell. -/
+def countGroup (B : Nat) : DTM (B + 2) where
+  step := fun s a =>
+    if h : s.val < B then
+      match a with
+      | some true => (⟨s.val + 1, by omega⟩, a, Dir.left)
+      | _ => (s, a, Dir.stay)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := ⟨B + 1, by omega⟩
+  reject := ⟨B + 1, by omega⟩
+
+/-- 非终止状态（≠ `B+1`）不停机。 States other than `B+1` never halt. -/
+theorem countGroup_halted_false (B : Nat) (st : Nat) (hst : st < B + 2) (h : st ≠ B + 1)
+    (t : Tape) : (countGroup B).halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (countGroup B).accept.val = B + 1 from rfl] at hv
+    exact h hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (countGroup B).reject.val = B + 1 from rfl] at hv
+    exact h hv
+
+/-- 计数步：读真格左移、状态加一（纸带只移动不改写）。 Counting step: move left, keep the cell. -/
+theorem countGroup_step_true (B st : Nat) (hs : st < B + 2) (hval : st < B)
+    (x : Sym) (L R : List Sym) :
+    (countGroup B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk (x :: L) (some true :: R))) =
+      Config.mk (⟨st + 1, by omega⟩ : Fin (B + 2)) (Tape.mk L (x :: some true :: R)) := by
+  simp only [DTM.stepConfig, countGroup, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rw [dif_pos hval]
+
+/-- 吸收步：读非真格或已满 `B`，原地不动。 Fixed point on a non-true cell (or when full). -/
+theorem countGroup_step_stuck (B st : Nat) (hs : st < B + 2) (a : Sym)
+    (ha : a ≠ some true) (L R : List Sym) :
+    (countGroup B).stepConfig
+        (Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk L (a :: R))) =
+      Config.mk (⟨st, hs⟩ : Fin (B + 2)) (Tape.mk L (a :: R)) := by
+  simp only [DTM.stepConfig, countGroup, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  cases a with
+  | none => split <;> rfl
+  | some b =>
+      cases b with
+      | false => split <;> rfl
+      | true => exact absurd rfl ha
+
+/-- **组计数整段（带初值状态）**：从状态 `j` 起数过 `k + 1` 个真格，`k + 1` 步后状态
+    `j + k + 1`，头停在紧随其后的非真格上，纸带只左移不改写。
+    Counting run with an initial state: pass `k + 1` true cells without erasing them. -/
+theorem countGroup_run_aux (B : Nat) :
+    ∀ (k j : Nat) (h1 : j < B + 2) (h2 : j + k + 1 < B + 2) (hj : j + k + 1 ≤ B)
+      (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym),
+      (countGroup B).run (k + 1)
+        ⟨(⟨j, h1⟩ : Fin (B + 2)),
+          Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: R)⟩ =
+        ⟨(⟨j + k + 1, h2⟩ : Fin (B + 2)),
+          Tape.mk L (a₀ :: List.replicate (k + 1) (some true) ++ R)⟩ := by
+  intro k
+  induction k with
+  | zero =>
+      intro j h1 h2 hj a₀ h₀ L R
+      rw [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp (countGroup B)
+        (Config.mk (⟨j, h1⟩ : Fin (B + 2)) (Tape.mk (a₀ :: L) (some true :: R)))
+        (countGroup_halted_false B j h1 (by omega) (Tape.mk (a₀ :: L) (some true :: R)))]
+      rw [countGroup_step_true B j h1 (by omega) a₀ L R]
+      rw [List.replicate_one]
+      rfl
+  | succ k ih =>
+      intro j h1 h2 hj a₀ h₀ L R
+      rw [show List.replicate (k + 1) (some true) ++ a₀ :: L
+            = some true :: (List.replicate k (some true) ++ a₀ :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [show (k + 1) + 1 = 1 + (k + 1) from by omega]
+      rw [DTM.run_add (countGroup B) 1 (k + 1)]
+      rw [run_one_stp (countGroup B)
+        (Config.mk (⟨j, h1⟩ : Fin (B + 2))
+          (Tape.mk (some true :: (List.replicate k (some true) ++ a₀ :: L)) (some true :: R)))
+        (countGroup_halted_false B j h1 (by omega)
+          (Tape.mk (some true :: (List.replicate k (some true) ++ a₀ :: L)) (some true :: R)))]
+      rw [countGroup_step_true B j h1 (by omega) (some true)
+        (List.replicate k (some true) ++ a₀ :: L) R]
+      rw [ih (j + 1) (by omega) (by omega) (by omega) a₀ h₀ L (some true :: R)]
+      rw [show 1 + (k + 1) = (k + 1) + 1 from by omega]
+      rw [List.cons_append, replicate_succ_append]
+      have hst : (j + 1) + k + 1 = j + (k + 1) + 1 := by omega
+      simp only [hst]
+      rfl
+
+/-- **组计数整段**：从状态 0 起数出 `k + 1` 个真格（不擦除），头停在非真格上。
+    Counting run from the start state: non-destructive, ends on the non-true cell. -/
+theorem countGroup_run (B k : Nat) (hk : k + 1 ≤ B) (a₀ : Sym) (h₀ : a₀ ≠ some true)
+    (L R : List Sym) :
+    (countGroup B).run (k + 1)
+      ⟨(0 : Fin (B + 2)),
+        Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: R)⟩ =
+      ⟨(⟨k + 1, by omega⟩ : Fin (B + 2)),
+        Tape.mk L (a₀ :: List.replicate (k + 1) (some true) ++ R)⟩ := by
+  have h1 : (0 : Nat) < B + 2 := by omega
+  have h2 : (0 : Nat) + k + 1 < B + 2 := by omega
+  have h := countGroup_run_aux B k 0 h1 h2 (by omega) a₀ h₀ L R
+  simp only [Nat.zero_add] at h
+  exact h
+
 end DTM
 
 end Pnp
