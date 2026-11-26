@@ -2241,3 +2241,25 @@ theorem mulMachine_finish_run (a b W : Nat) (ha : 1 ≤ a) (hb : 2 ≤ b) (hW : 
   rw [mulMachine_phase_final a (b * a) ha (by omega)
     (List.replicate (b - 1) (some false) ++ (none :: (none :: L)))
     (List.replicate (W - b * a) (none : Sym) ++ R)]
+
+/-- **接受态形态**：主定理的终点就是 `mulMachine.accept`（数值 27），便于装配层直接用
+    「停在接受态」的语句调用。
+    The endpoint of the main theorem is literally `mulMachine.accept`, so assembly layers can
+    state it as "halts in the accept state". -/
+theorem mulMachine_finish_accept (a b W : Nat) (ha : 1 ≤ a) (hb : 2 ≤ b) (hW : b * a ≤ W)
+    (L R : List Sym) :
+    mulMachine.run
+      (mulLoopSteps (b - 2) a b W
+        + (mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+        + (mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+        + (a + 2 + 1)
+        + (a + b * a + 4))
+      ⟨mulMachine.start, Tape.mk (mulL a b 0 0 L) (mulR 0 0 W R)⟩
+      = ⟨mulMachine.accept,
+          Tape.mk (List.replicate (b * a) (some true) ++
+              (none :: (List.replicate a (some true) ++
+                (none :: (some false ::
+                  (List.replicate (b - 1) (some false) ++ (none :: (none :: L))))))))
+            (none :: (List.replicate (W - b * a) (none : Sym) ++ R))⟩ := by
+  rw [mulMachine_finish_run a b W ha hb hW L R]
+  rfl
