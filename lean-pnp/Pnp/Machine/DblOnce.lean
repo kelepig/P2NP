@@ -823,6 +823,17 @@ theorem dblChained_rounds (r m : Nat) (hm : 1 ≤ m) (L : List Sym) :
           show 2 ^ r + 2 ^ r = 2 ^ r * 2 from by omega]
       rw [h]
 
+/-- **多轮倍增可拼接**：先跑 `r` 轮、再跑 `r'` 轮，等于跑 `r + r'` 轮（步数相加）。
+    Two batches of chained doubling rounds concatenate: `r` then `r'` = `r + r'`. -/
+theorem dblChained_rounds_add (r r' m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblChained.run (dblChainSteps r m + dblChainSteps r' (m * 2 ^ r))
+      ⟨dblChained.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+    ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m * 2 ^ (r + r')) ++ [none])⟩ := by
+  rw [DTM.run_add dblChained (dblChainSteps r m) (dblChainSteps r' (m * 2 ^ r)),
+    dblChained_rounds r m hm L,
+    dblChained_rounds r' (m * 2 ^ r) (Nat.mul_pos hm (Nat.pow_pos (by decide : 0 < 2))) L,
+    Nat.pow_add, Nat.mul_assoc]
+
 end DTM
 
 end Pnp
