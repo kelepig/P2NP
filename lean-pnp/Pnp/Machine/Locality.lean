@@ -318,6 +318,26 @@ theorem padLeft_move {t1 t2 : Tape} (h : PadLeft t1 t2) (d : Dir) (hne : t1.left
       show PadLeft t1 t2
       exact h
 
+/-- **弱化的移动引理**：只有在左端为空时禁止左移；实际只有左移会破坏左尾绝缘。
+    Weaker move lemma: only a left move at the empty left end can break insulation. -/
+theorem padLeft_step {t1 t2 : Tape} (h : PadLeft t1 t2) (s : Sym) (d : Dir)
+    (hok : t1.left = [] → d ≠ Dir.left) :
+    PadLeft ((t1.write s).move d) ((t2.write s).move d) := by
+  have hw := padLeft_write h s
+  cases d with
+  | left =>
+      have hne : t1.left ≠ [] := by
+        intro hnil
+        exact hok hnil rfl
+      show PadLeft ((t1.write s).moveLeft) ((t2.write s).moveLeft)
+      exact padLeft_moveLeft hw (by simpa [write] using hne)
+  | right =>
+      show PadLeft ((t1.write s).moveRight) ((t2.write s).moveRight)
+      exact padLeft_moveRight hw
+  | stay =>
+      show PadLeft (t1.write s) (t2.write s)
+      exact hw
+
 end Tape
 
 namespace DTM
@@ -435,6 +455,69 @@ theorem obsPhase_esc_of_simObs_fail (q b : Nat) (M : NTM q) (K : Nat)
     rw [DTM.run_add (obsPhase q b M) K 1,
       run_of_halted (obsPhase q b M) _ hhalt]
     exact hr
+
+end DTM
+
+
+namespace DTM
+
+variable {q : Nat}
+
+/-- **弱化版一步保持**：左端为空且下一步不左移时，左尾绝缘保持。
+    Weak one-step preservation: insulation survives an empty left end as long as the move
+    is not left. -/
+theorem step_padLeft' (M : DTM q) {c1 c2 : Config q}
+    (hs : c1.state = c2.state) (hP : Tape.PadLeft c1.tape c2.tape)
+    (hok : c1.tape.left = [] →
+      (M.step c1.state c1.tape.read).2.2 ≠ Dir.left) :
+    (M.stepConfig c1).state = (M.stepConfig c2).state ∧
+      Tape.PadLeft (M.stepConfig c1).tape (M.stepConfig c2).tape := by
+  have hr : c1.tape.read = c2.tape.read := Tape.padLeft_read hP
+  have hstep : M.step c1.state c1.tape.read = M.step c2.state c2.tape.read := by
+    rw [hs, hr]
+  have hok2 : c1.tape.left = [] → (M.step c2.state c2.tape.read).2.2 ≠ Dir.left := by
+    intro hnil hleft
+    exact hok hnil (by rw [hstep]; exact hleft)
+  refine ⟨?_, ?_⟩
+  · rw [stepConfig_state, stepConfig_state, hstep]
+  · unfold DTM.stepConfig
+    rw [hstep]
+    exact Tape.padLeft_step hP _ _ hok2
+
+/-- **弱化版左副本绝缘主定理**：只需「左端为空时机器人不左移」，状态轨迹就与远端左尾无关。
+    Weakened insulation: the trajectory is independent of the far-left tail provided the
+    machine never moves left while standing on the leftmost cell. -/
+theorem run_state_eq_of_padLeft' (M : DTM q) (k : Nat) :
+    ∀ (c1 c2 : Config q), c1.state = c2.state →
+      Tape.PadLeft c1.tape c2.tape →
+      (∀ j, j < k → (M.run j c1).tape.left = [] →
+        (M.step (M.run j c1).state (M.run j c1).tape.read).2.2 ≠ Dir.left) →
+      (M.run k c1).state = (M.run k c2).state := by
+  induction k with
+  | zero =>
+      intro c1 c2 hs _ _
+      exact hs
+  | succ K ih =>
+      intro c1 c2 hs hP hok
+      by_cases hc : M.halted c1 = true
+      · have hc2 : M.halted c2 = true := by rw [← halted_congr M hs]; exact hc
+        rw [run_of_halted M c1 hc (K + 1), run_of_halted M c2 hc2 (K + 1)]
+        exact hs
+      · have hc0 : M.halted c1 = false := by
+          cases h : M.halted c1 with
+          | false => rfl
+          | true => exact absurd h hc
+        have hc2 : M.halted c2 = false := by rw [← halted_congr M hs]; exact hc0
+        rw [run_succ_of_not_halted M K c1 hc0, run_succ_of_not_halted M K c2 hc2]
+        have hstep := step_padLeft' M hs hP (hok 0 (by omega))
+        have hok' : ∀ j, j < K → (M.run j (M.stepConfig c1)).tape.left = [] →
+            (M.step (M.run j (M.stepConfig c1)).state
+              (M.run j (M.stepConfig c1)).tape.read).2.2 ≠ Dir.left := by
+          intro j hj hnil
+          have h1 := hok (j + 1) (by omega)
+          rw [run_succ_of_not_halted M j c1 hc0] at h1
+          exact h1 hnil
+        exact ih (M.stepConfig c1) (M.stepConfig c2) hstep.1 hstep.2 hok'
 
 end DTM
 
