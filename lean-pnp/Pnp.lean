@@ -94,6 +94,8 @@ import Pnp.Machine.Expand
 import Pnp.Machine.ExpandRun
 import Pnp.Machine.RegionBuild
 import Pnp.Machine.CopyCell
+import Pnp.Machine.CopyCell
+import Pnp.Machine.Go
 import Pnp.Machine.CopyBlock
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
