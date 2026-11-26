@@ -29,6 +29,7 @@ import Pnp.Machine.Stutter
 import Pnp.Machine.PadBranch
 import Pnp.Machine.SimHitComplete
 import Pnp.Machine.ObsBudget
+import Pnp.Machine.BranchPhase
 
 namespace Pnp
 
@@ -278,6 +279,63 @@ theorem simObs_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
     rw [simDrive_dummy_round q b ((M.stutter).haltNorm).step
       ((M.stutter).haltNorm).start x Z k hc0 hK hpre hx0 ks]
   exact hl
+
+/-- **哑元前缀的命中平移**：若某分支在「计数器 `k + 1`、数字区 `ks`」的起点上于 `n` 步内
+    命中接受哨兵，则观察机从自身起始态（计数器 0、数字区 `k :: ks`）出发，在
+    `roundCostStay x Z k x.cur + n` 步内同样命中。
+    Hit shift across the dummy prefix. -/
+theorem exists_obs_acc_of_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
+    (hc0 : 0 < 2 ^ b) (hK : k + 2 < 2 ^ b) (hpre : ∀ p ∈ x.pre, p.2 = false)
+    (hxs : x.state = M.start) (hxne : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (ks : List Nat) (hc : k + 1 < 2 ^ b) (n : Nat)
+    (h : ((simObs q b ((M.stutter).haltNorm)).run n
+        (obsStart q b (M.stutter) x x.state.val (k + 1) (Z + k + 3) x.state.isLt hc
+          ks)).state = obsAcc q b) :
+    ∃ n', n' ≤ roundCostStay x Z k x.cur + n ∧
+      ((simObs q b ((M.stutter).haltNorm)).run n'
+        ⟨(simObs q b ((M.stutter).haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩).state
+        = obsAcc q b := by
+  refine ⟨roundCostStay x Z k x.cur + n, Nat.le_refl _, ?_⟩
+  rw [DTM.run_add]
+  rw [simObs_dummy_prefix q b M x Z k hc0 hK hpre hxs hxne hxre ks]
+  exact h
+
+/-- **哑元前缀的预算平移（运行相位机）**：分支族成员在「计数器 `k + 1`」起点的接受，
+    可直接搬到观察机自身起点（计数器 0、数字区 `k :: ks`），预算多加一个哑元轮成本。
+    Budget shift across the dummy prefix for the run-phase machine. -/
+theorem obsPhase_accepts_at_budget_of_obsStart_branch (q b : Nat) (M : NTM q) (x : Reg q)
+    (Z k n budget : Nat) (hc0 : 0 < 2 ^ b) (hK : k + 2 < 2 ^ b)
+    (hpre : ∀ p ∈ x.pre, p.2 = false)
+    (hxs : x.state = M.start) (hxne : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (ks : List Nat) (hc : k + 1 < 2 ^ b)
+    (hn : roundCostStay x Z k x.cur + n ≤ budget)
+    (h : ((obsPhase q b ((M.stutter).haltNorm)).run n
+        ⟨embOb q b (obsStart q b (M.stutter) x x.state.val (k + 1) (Z + k + 3)
+            x.state.isLt hc ks).state,
+          (obsStart q b (M.stutter) x x.state.val (k + 1) (Z + k + 3)
+            x.state.isLt hc ks).tape⟩).state
+        = (obsPhase q b ((M.stutter).haltNorm)).accept) :
+    ((obsPhase q b ((M.stutter).haltNorm)).run budget
+        ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩).state
+        = (obsPhase q b ((M.stutter).haltNorm)).accept := by
+  -- 分支族的接受 ⇔ 观察机命中
+  have hS : ((simObs q b ((M.stutter).haltNorm)).run n
+      (obsStart q b (M.stutter) x x.state.val (k + 1) (Z + k + 3) x.state.isLt hc ks)).state
+      = obsAcc q b :=
+    (obsPhase_accept_iff q b ((M.stutter).haltNorm) n _).mp h
+  -- 把命中平移到机器自身起点
+  obtain ⟨n', hn', hhit⟩ :=
+    exists_obs_acc_of_dummy_prefix q b M x Z k hc0 hK hpre hxs hxne hxre ks hc n hS
+  -- 命中 ⇒ 运行相位机在 `n'` 步接受，再延长到预算 `budget`
+  have hph := obsPhase_budget_accept q b ((M.stutter).haltNorm) n'
+    ⟨(simObs q b ((M.stutter).haltNorm)).start,
+      x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩ hhit
+  exact obsPhase_accept_mono q b ((M.stutter).haltNorm) n' budget
+    ⟨(simObs q b ((M.stutter).haltNorm)).start,
+      x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩
+    (Nat.le_trans hn' hn) (by simpa [obsPhase] using congrArg Config.state hph)
 
 end DTM
 
