@@ -27,6 +27,8 @@
 import Pnp.Machine.SimPass
 import Pnp.Machine.Stutter
 import Pnp.Machine.PadBranch
+import Pnp.Machine.SimHitComplete
+import Pnp.Machine.ObsBudget
 
 namespace Pnp
 
@@ -112,6 +114,68 @@ theorem simDrive_pass_dummy (q b : Nat) (tab : Fin q → Sym → List (Fin q × 
   rw [simDrive_dummy_round q b tab s0 x Z k hc0 hk hpre h0 ks]
   exact simDrive_pass q b tab s0 ks (Z + k + 3) (k + 1) (by omega) x x.state.val
     x.state.isLt rfl hpre hpost hb r hpass
+
+/-- **分支命中（机器自身起点版）**：通路以 `c = 0` 起跑并停在接受态 ⇒ 观察机从**自己的
+    起始态**出发（而非从 `passStart` 的格局出发），在 `r.steps` 步内命中接受哨兵。
+    Hit lemma from the machine's own start state (counter 0). -/
+theorem exists_obs_acc_of_passRun_accept_start {q b : Nat} (M : NTM q) (L : List Nat)
+    (hL : L ≠ []) (Z : Nat) (x : Reg q) (hx : x.state = M.start)
+    (hpre : ∀ p0 ∈ x.pre, p0.2 = false) (hpost : ∀ p0 ∈ x.post, p0.2 = false)
+    (hb : ∀ k' ∈ L, k' + 2 < 2 ^ b) (hc0 : 0 < 2 ^ b)
+    (r : PassRes q b) (hpass : passRun q b (M.haltNorm).step Z 0 hc0 x L hb = some r)
+    (hacc : r.reg.state = (M.haltNorm).accept) :
+    ∃ n, n ≤ r.steps ∧
+      ((simObs q b (M.haltNorm)).run n
+        ⟨(simObs q b (M.haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false) ++ digitArea L)⟩).state
+        = obsAcc q b := by
+  obtain ⟨n, hn, h⟩ := exists_obs_acc_of_passRun_accept q b M L hL Z 0 hc0 x M.start.val
+    M.start.isLt (by rw [← hx]) hpre hpost hb r hpass hacc
+  have hcfg : obsStart q b M x M.start.val 0 Z M.start.isLt hc0 L
+      = Config.mk (simObs q b (M.haltNorm)).start
+          (x.enc (none :: List.replicate Z (some false) ++ digitArea L)) :=
+    (Config.mk.injEq _ _ _ _).mpr
+      ⟨(simObs_start_eq_passStart (M.haltNorm) hc0 x Z L).symm, rfl⟩
+  rw [hcfg] at h
+  exact ⟨n, hn, h⟩
+
+/-- **运行相位机的起点 = `obsStart`（`c = 0`）状态**：两者只差一层 `embOb`，故从机器自身起点
+    出发的运行与从 `obsStart` 格局出发的运行逐字一致（同一纸带时）。
+    The phase machine's start state is the counter-0 `obsStart` state. -/
+theorem obsPhase_start_eq_embOb_obsStart (q b : Nat) (M : NTM q) (hc0 : 0 < 2 ^ b)
+    (x : Reg q) (Z : Nat) (L : List Nat) :
+    (obsPhase q b (M.haltNorm)).start
+      = embOb q b (obsStart q b M x M.start.val 0 Z M.start.isLt hc0 L).state := by
+  show embOb q b (simObs q b (M.haltNorm)).start
+    = embOb q b (obsStart q b M x M.start.val 0 Z M.start.isLt hc0 L).state
+  rw [simObs_start_eq_passStart (M.haltNorm) hc0 x Z L]
+  rfl
+
+/-- **分支接受（机器自身起点 + 统一预算）**：通路以 `c = 0` 起跑并停在接受态 ⇒ 运行相位机
+    从**自己的起始态**出发，在统一预算 `2^((2·2^b+42)·T)` 内停在接受态。
+    Accepting branch from the machine's own start at the uniform budget. -/
+theorem obsPhase_accepts_at_budget_of_passRun_accept_start (q b T : Nat) (M : NTM q)
+    (L : List Nat) (hLne : L ≠ []) (hL : L.length ≤ T)
+    (Z : Nat) (x : Reg q) (hx : x.state = M.start)
+    (hpre' : ∀ p0 ∈ x.pre, p0.2 = false) (hpost' : ∀ p0 ∈ x.post, p0.2 = false)
+    (hb : ∀ k' ∈ L, k' + 2 < 2 ^ b) (hc0 : 0 < 2 ^ b)
+    (hpre : x.pre.length ≤ T) (hZ : Z ≤ T)
+    (r : PassRes q b) (hpass : passRun q b (M.haltNorm).step Z 0 hc0 x L hb = some r)
+    (hracc : r.reg.state = (M.haltNorm).accept) :
+    ((obsPhase q b (M.haltNorm)).run (2 ^ ((2 * 2 ^ b + 42) * T))
+        ⟨(obsPhase q b (M.haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false) ++ digitArea L)⟩).state
+      = (obsPhase q b (M.haltNorm)).accept := by
+  have h := obsPhase_accepts_at_budget_of_passRun_accept q b T M L hLne hL Z 0 hc0 x
+    M.start.val M.start.isLt (by rw [← hx]) hpre' hpost' hb hpre hZ r hpass hracc
+  have hcfg : Config.mk (embOb q b (obsStart q b M x M.start.val 0 Z M.start.isLt hc0 L).state)
+        (obsStart q b M x M.start.val 0 Z M.start.isLt hc0 L).tape
+      = Config.mk (obsPhase q b (M.haltNorm)).start
+          (x.enc (none :: List.replicate Z (some false) ++ digitArea L)) :=
+    (Config.mk.injEq _ _ _ _).mpr
+      ⟨(obsPhase_start_eq_embOb_obsStart q b M hc0 x Z L).symm, rfl⟩
+  rw [hcfg] at h
+  exact h
 
 end DTM
 
