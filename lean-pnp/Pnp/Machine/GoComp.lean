@@ -191,6 +191,55 @@ theorem goLeft2_halted_false (a b k : Nat) (t : Tape) (hk : k < a + 1 + b)
   · obtain ⟨j, rfl⟩ : ∃ j, k = (a + 1) + j := ⟨k - (a + 1), by omega⟩
     exact goLeft2_halted_false_right a b t j (by omega) hr
 
+/-- **头定位 + 写头标记机**：左移 `n` 格后原地写入 `some true`（区域编码的头标记）。
+    状态数 `(n+1) + 2`。
+    Head locator and marker: move left `n` cells, then write `some true` in place. -/
+def markAlign (n : Nat) : DTM ((n + 1) + 2) :=
+  seqComp (goLeft n) markHead
+
+/-- **`markAlign` 的主运行引理**：`n + 1 + 1` 步后停在接受态，纸带左移 `n` 格且当前格
+    被改写成 `some true`（区域编码的头标记位）。
+    Primary run lemma for `markAlign`. -/
+theorem markAlign_run (n : Nat) (t : Tape) (hr : t.right ≠ []) :
+    (markAlign n).run (n + 1 + 1) ⟨(markAlign n).start, t⟩
+      = ⟨(markAlign n).accept, (moveLeftN n t).write (some true)⟩ := by
+  have hne : (moveLeftN n t).right ≠ [] := moveLeftN_right_ne_of_pos n t hr
+  -- 右带拆成「头符号 + 余下」
+  obtain ⟨L, a, R, ht⟩ : ∃ L a R, moveLeftN n t = Tape.mk L (a :: R) := by
+    obtain ⟨L, R⟩ := moveLeftN n t
+    cases R with
+    | nil => exact absurd rfl hne
+    | cons a as => exact ⟨L, a, as, rfl⟩
+  -- 左段不停机
+  have hnhA : ∀ i, i < n → (goLeft n).halted ((goLeft n).run i ⟨(goLeft n).start, t⟩) = false := by
+    intro i hi
+    rw [show (goLeft n).start = (⟨0, by omega⟩ : Fin (n + 1)) from rfl]
+    rw [goLeft_run_from n i 0 t (by omega) hr]
+    exact goLeft_halted_false n (0 + i) (by omega) (moveLeftN i t)
+  -- 右段（`markHead` 一步）不停机（只有 `k = 0`）
+  have hnhB : ∀ i, i < 1 →
+      markHead.halted (markHead.run i ⟨markHead.start, moveLeftN n t⟩) = false := by
+    intro i hi
+    have hi0 : i = 0 := by omega
+    subst hi0
+    exact markHead_halted_zero (moveLeftN n t)
+  refine seqComp_run (goLeft n) markHead n 1 ⟨(goLeft n).start, t⟩
+    (moveLeftN n t) ((moveLeftN n t).write (some true))
+    (goLeft_run n t hr) hne ?_ hnhA hnhB
+  -- `markHead` 在主纸带上的运行
+  rw [ht]
+  have := markHead_run L a R
+  rw [show (moveLeftN n t).write (some true) = Tape.mk L (some true :: R) from by
+    rw [ht]; rfl]
+  exact this
+
+/-- `markAlign` 的结果与「分段左移」写法一致：`moveLeftN (a + (b + 1))` 即
+    「左移 `a`、再左移 `b`、再左移 1」，与 `ExpandInit` 的纸带级链直接对接。
+    The merged paper form matching the nested spec chain. -/
+theorem moveLeftN_split3 (a b : Nat) (t : Tape) :
+    moveLeftN (a + (b + 1)) t = Tape.moveLeft (moveLeftN b (moveLeftN a t)) := by
+  rw [moveLeftN_add, moveLeftN_add]
+
 end DTM
 
 end Pnp
