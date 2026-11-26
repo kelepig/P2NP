@@ -105,6 +105,7 @@ import Pnp.Machine.UnaryArith
 import Pnp.Machine.DblOnce
 import Pnp.Machine.PadConv
 import Pnp.Machine.WalkLT
+import Pnp.Machine.MarkTrue
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
