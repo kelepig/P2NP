@@ -130,6 +130,7 @@ import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
 import Pnp.Machine.AlignChain
+import Pnp.Machine.BranchEntry
 import Pnp.IndexedSimulation
 import Pnp.Search
 import Pnp.TapeEncoding
