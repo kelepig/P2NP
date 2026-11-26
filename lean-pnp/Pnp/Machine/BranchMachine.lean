@@ -437,6 +437,37 @@ theorem branchMachine_dummy_iff {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
     exact DTM.run_add_state_of_accept _ _ _ _ haccm
 
 
+/-- **左预留前提的自动成立**：副垫 `m ≥ T + 1`、`t ≤ T` 时，分支块表放得进初始区域左侧。
+    The left-pad premise holds automatically once `m ≥ T + 1` and `t ≤ T`. -/
+theorem branchMachine_pre_ok {q : Nat} (M : NTM q) (w : List Bool) {B : Nat}
+    (T m t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (htT : t ≤ T) (hm : T + 1 ≤ m) :
+    (branchBlocks B t i).length + 1 ≤ (Reg.initReg M.start w m m).pre.length := by
+  rw [Reg.initReg_pre_length, branchBlocks_length B t i (by omega)]
+  omega
+
+/-- **右预留前提的自动成立**：同上，右侧格数至少 `m`。
+    The right-pad premise holds automatically for the same reasons. -/
+theorem branchMachine_post_ok {q : Nat} (M : NTM q) (w : List Bool) {B : Nat}
+    (T m t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (htT : t ≤ T) (hm : T + 1 ≤ m) :
+    (branchBlocks B t i).length + 1 ≤ (Reg.initReg M.start w m m).post.length := by
+  rw [Reg.initReg_post_length, branchBlocks_length B t i (by omega)]
+  have : 0 ≤ ((w.map some).drop 1).length := Nat.zero_le _
+  omega
+
+/-- **右长覆盖前提的自动成立**：只要预算加一不超过 `3m+1`，右侧格数够用。
+    The right-length covering premise follows from a bound on the pad size. -/
+theorem branchMachine_right_ok {q : Nat} (M : NTM q) (w : List Bool)
+    (Z T B b m : Nat)
+    (hp : roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+        + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1 ≤ 3 * m + 1) :
+    roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+        + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w m m).post.length + 1 := by
+  have hge := Reg.initReg_post_ge M.start w m m
+  have hmul : 3 * m ≤ 3 * (Reg.initReg M.start w m m).post.length :=
+    Nat.mul_le_mul_left 3 hge
+  omega
+
 end DTM
 
 end Pnp
