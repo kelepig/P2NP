@@ -100,6 +100,7 @@ import Pnp.Machine.WriteBack
 import Pnp.Machine.RegionAlgebra
 import Pnp.Machine.ExpandEnc
 import Pnp.Machine.PadRegion
+import Pnp.Machine.ExpandInit
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
