@@ -2305,3 +2305,24 @@ theorem readWriteSeg_run (B k : Nat) (hkB : k + 1 ≤ B) (a₀ : Sym) (h₀ : a�
     (a₀ :: (List.replicate k (some true) ++ some true :: R)) hlen]
   rw [show (a₀ :: (List.replicate k (some true) ++ some true :: R)).tail
       = List.replicate k (some true) ++ some true :: R from rfl]
+
+/-- **读段写块（组循环入口形态）**：入口右带取 `some true :: none :: R`（头下真格、其右紧接空白垫）
+    时，出口右带是连续非空白 `真格^(2k+3) ++ 空白 :: R`——正是 `skipNonBlankR` 的入口形态。
+    `readWriteSeg_run` in the entry shape used by the group loop. -/
+theorem readWriteSeg_run_pad (B k : Nat) (hkB : k + 1 ≤ B) (a₀ : Sym)
+    (h₀ : a₀ ≠ some true) (L R : List Sym) (hlen : k + 2 ≤ L.length) :
+    (readWriteSeg B).run (2 * k + 5)
+        ⟨(⟨0, by omega⟩ : Fin (2 * B + 6)),
+          Tape.mk (List.replicate k (some true) ++ a₀ :: L) (some true :: none :: R)⟩ =
+      ⟨(⟨2 * B + 5, by omega⟩ : Fin (2 * B + 6)),
+        Tape.mk (some false :: L.drop (k + 2))
+          (List.replicate (2 * k + 3) (some true) ++ none :: R)⟩ := by
+  rw [readWriteSeg_run B k hkB a₀ h₀ L (none :: R) hlen]
+  rw [show List.replicate (k + 2) (some true)
+        ++ (List.replicate k (some true) ++ some true :: none :: R)
+      = List.replicate (2 * k + 3) (some true) ++ none :: R from by
+    rw [replicate_succ_append k (some true) (none :: R)]
+    rw [← List.append_assoc]
+    rw [List.replicate_append_replicate]
+    rw [show k + 2 + (k + 1) = 2 * k + 3 from by omega]]
+
