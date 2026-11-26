@@ -529,6 +529,30 @@ theorem run_succ_last (M : DTM q) (n : Nat) (c : Config q)
   simp only [h, Bool.false_eq_true, ite_false]
   rfl
 
+/-- **终点非终止 ⇒ 全程未停机**：若 `n` 步后的状态既非接受也非拒绝，
+    则前 `n` 步（不含第 `n` 步之后的格局）内从未停机。
+    If the state after `n` steps is neither accept nor reject, the machine never halted
+    during those `n` steps. Used to feed `run_embed`-style composition lemmas with a
+    single endpoint fact instead of a step-by-step invariant. -/
+theorem halted_false_before (M : DTM q) (n : Nat) (c : Config q)
+    (hacc : (M.run n c).state ≠ M.accept) (hrej : (M.run n c).state ≠ M.reject) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  intro k hk
+  cases hh : M.halted (M.run k c) with
+  | false => rfl
+  | true =>
+      -- 若在第 k 步已停机，则此后格局不再变化，终点状态也会终止，矛盾
+      exfalso
+      have hfix : M.run n c = M.run k c := by
+        rw [show n = k + (n - k) from by omega, DTM.run_add M k (n - k) c]
+        exact run_of_halted M (M.run k c) hh (n - k)
+      rw [← hfix] at hh
+      have hfalse : M.halted (M.run n c) = false := by
+        rw [DTM.halted, Bool.or_eq_false_iff]
+        exact ⟨beq_eq_false_iff_ne.mpr hacc, beq_eq_false_iff_ne.mpr hrej⟩
+      rw [hfalse] at hh
+      exact Bool.noConfusion hh
+
 /-- 停机判断只取决于当前状态是否等于接受或拒绝状态。 -/
 theorem halted_of_accept_or_reject (M : DTM q) (c : Config q)
     (h : c.state = M.accept ∨ c.state = M.reject) : M.halted c = true := by
