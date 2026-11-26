@@ -426,6 +426,51 @@ theorem exists_branch_dummy_hit_of_acceptsWithin {q : Nat} (M : NTM q) {B : Nat}
         + (2 ^ ((2 * 2 ^ b + 42) * (T + 1)) + 2 * (B + 3) * (T + 1)))
       _ (by omega) hhit2⟩
 
+/-- **分支族可靠性的「哑元入口」版**：若运行相位机从**自身起始态**（计数器 0、数字区
+    `i % B :: branchBlocks`）在预算 `K` 内接受（`K` 至少覆盖「哑元轮 + 分支预算」），
+    则原机在 `T'` 步内接受。
+    Reliability in the dummy-entry form: acceptance from the observer's own start implies
+    `M.AcceptsWithin` once the budget covers the dummy round plus the branch budget. -/
+theorem acceptsWithin_of_dummy_branch_acc (q b B T i T' : Nat) (M : NTM q) (w : List Bool)
+    (hB : 0 < B) (hb : B + 2 < 2 ^ b)
+    (hl : ∀ m a, ((M.stutter).step m a).length ≤ B + 1)
+    (Z : Nat) (x : Reg q)
+    (hxM : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hpre : ∀ p0 ∈ x.pre, p0.2 = false) (hpost : ∀ p0 ∈ x.post, p0.2 = false)
+    (hpadpost : (branchBlocks B T i).length + 1 ≤ x.post.length)
+    (hpadpre : (branchBlocks B T i).length + 1 ≤ x.pre.length)
+    (hlen : (branchBlocks B T i).length ≤ T')
+    (hc0 : 0 < 2 ^ b) (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
+    (hxm : x.state = M.start) (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (hAcc : ((obsPhase q b ((M.stutter).haltNorm)).run
+      (roundCostStay x Z (i % B) x.cur
+        + (T' * costCap x.pre.length (Z + i % B + 3) T' (2 ^ b) + 6))
+      ⟨(obsPhase q b ((M.stutter).haltNorm)).start,
+        x.enc (none :: List.replicate Z (some false)
+          ++ digitArea (i % B :: branchBlocks B T i))⟩).state
+      = (obsPhase q b ((M.stutter).haltNorm)).accept) :
+    M.AcceptsWithin w T' := by
+  -- 1. 运行相位机接受 ⇒ 观察机在整段预算内命中
+  have hHit : ((simObs q b ((M.stutter).haltNorm)).run
+      (roundCostStay x Z (i % B) x.cur
+        + (T' * costCap x.pre.length (Z + i % B + 3) T' (2 ^ b) + 6))
+      ⟨(simObs q b ((M.stutter).haltNorm)).start,
+        x.enc (none :: List.replicate Z (some false)
+          ++ digitArea (i % B :: branchBlocks B T i))⟩).state = obsAcc q b :=
+    (obsPhase_accept_iff q b ((M.stutter).haltNorm) _ _).mp hAcc
+  -- 2. 拆成「哑元轮 + 分支预算」
+  rw [show roundCostStay x Z (i % B) x.cur
+        + (T' * costCap x.pre.length (Z + i % B + 3) T' (2 ^ b) + 6)
+      = roundCostStay x Z (i % B) x.cur
+        + (T' * costCap x.pre.length (Z + i % B + 3) T' (2 ^ b) + 6) from rfl,
+    DTM.run_add,
+    simObs_dummy_prefix q b M x Z (i % B) hc0 hk2 hpre hxm hxacc hxre (branchBlocks B T i)] at hHit
+  -- 3. 分支级可靠性
+  exact acceptsWithin_of_branch_obsPhase_acc q b B T i M w T' hB hb hl
+    (Z + i % B + 3) (i % B + 1) hk1 x x.state.val x.state.isLt rfl hxM hxw hpre hpost
+    hpadpost hpadpre hlen
+    ((obsPhase_accept_iff q b ((M.stutter).haltNorm) _ _).mpr hHit)
+
 end DTM
 
 end Pnp
