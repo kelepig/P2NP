@@ -109,6 +109,7 @@ import Pnp.Machine.MarkTrue
 import Pnp.Machine.WalkRT
 import Pnp.Machine.UnaryAdd
 import Pnp.Machine.WalkLC
+import Pnp.Machine.WalkRC
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
