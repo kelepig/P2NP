@@ -2122,3 +2122,122 @@ theorem mulMachine_loops : ∀ (k a b W : Nat), 1 ≤ a → k + 2 ≤ b → k * 
       rw [mulMachine_loop_step a b k (W - k * a) (k * a) ha hk' hwa' L R]
       rw [Nat.succ_mul]
       rw [show W - k * a - a = W - (k * a + a) from by omega]
+
+/-- `b·a = (b-1)·a + a`（`b ≥ 1`）。
+    `b·a = (b-1)·a + a` for `b ≥ 1`. -/
+theorem mul_eq_pred_mul_add (a b : Nat) (h : 1 ≤ b) : b * a = (b - 1) * a + a := by
+  match b with
+  | 0 => omega
+  | k + 1 =>
+    show (k + 1) * a = ((k + 1) - 1) * a + a
+    rw [Nat.succ_mul]
+    simp
+
+/-- `(b-1)·a = (b-2)·a + a`（`b ≥ 2`）。
+    `(b-1)·a = (b-2)·a + a` for `b ≥ 2`. -/
+theorem pred_mul_eq (a b : Nat) (h : 2 ≤ b) : (b - 1) * a = (b - 2) * a + a := by
+  match b with
+  | 0 => omega
+  | 1 => omega
+  | k + 2 =>
+    show ((k + 2) - 1) * a = ((k + 2) - 2) * a + a
+    rw [show (k + 2) - 1 = k + 1 from by omega,
+      show (k + 2) - 2 = k from by omega, Nat.succ_mul]
+
+/-! ### 整机主定理：`b` 轮乘法（自动收尾） -/
+
+/-- **乘法整机主定理**：从 `r = 0, d = 0, w = W` 出发，整机自动跑 `b` 轮（前 `b-2` 轮
+    后接「继续」检测、第 `b-1` 轮后接「耗尽」检测），再做收尾相位，停在接受态；
+    副本区得到 `b·a` 个 `some true`。
+    The whole multiplication machine: `b` automatic rounds (followed by continue checks except
+    the last, which is followed by the exhaustion check), then the final phase; it halts in the
+    accept state with `b·a` copies. -/
+theorem mulMachine_finish_run (a b W : Nat) (ha : 1 ≤ a) (hb : 2 ≤ b) (hW : b * a ≤ W)
+    (L R : List Sym) :
+    mulMachine.run
+      (mulLoopSteps (b - 2) a b W
+        + (mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+        + (mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+        + (a + 2 + 1)
+        + (a + b * a + 4))
+      ⟨mulMachine.start, Tape.mk (mulL a b 0 0 L) (mulR 0 0 W R)⟩
+      = ⟨mulEmbF mulFinal.accept,
+          Tape.mk (List.replicate (b * a) (some true) ++
+              (none :: (List.replicate a (some true) ++
+                (none :: (some false ::
+                  (List.replicate (b - 1) (some false) ++ (none :: (none :: L))))))))
+            (none :: (List.replicate (W - b * a) (none : Sym) ++ R))⟩ := by
+  -- 循环段
+  have hW2 : (b - 2) * a ≤ W :=
+    Nat.le_trans (Nat.mul_le_mul_right a (by omega : b - 2 ≤ b)) hW
+  have hloop := mulMachine_loops (b - 2) a b W ha (by omega) hW2 L R
+  -- 各桥接等式
+  have hmulb : b * a = (b - 1) * a + a := mul_eq_pred_mul_add a b (by omega)
+  have hmulb2 : (b - 1) * a = (b - 2) * a + a := pred_mul_eq a b (by omega)
+  have hb1 : a ≤ W - (b - 1) * a := by
+    have h := hW
+    rw [hmulb] at h
+    omega
+  have hwa2 : a ≤ W - (b - 2) * a := by
+    have h1 : (b - 2) * a + a ≤ W := by
+      have h := hW
+      rw [hmulb, hmulb2] at h
+      omega
+    omega
+  -- 最后一轮后的形态：B 已耗尽（首格 `some false`）
+  have hP2 : mulL a b b 0 L
+      = List.replicate (a - 1) (some true) ++ (none :: (some false ::
+          (List.replicate (b - 1) (some false) ++ (none :: (none :: L))))) := by
+    simp only [mulL, mulB, Nat.sub_zero]
+    rw [show b - b = 0 from by omega]
+    rw [show b = b - 1 + 1 from by omega, List.replicate_succ]
+    simp
+  have hQ2 : mulR (b * a) 0 (W - b * a) R
+      = some true :: (none :: (List.replicate (b * a) (some false) ++
+          (none :: (List.replicate (W - b * a) (none : Sym) ++ R)))) := by
+    simp [mulR]
+  -- 步数分解
+  rw [show mulLoopSteps (b - 2) a b W
+        + (mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+        + (mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+        + (a + 2 + 1)
+        + (a + b * a + 4)
+      = mulLoopSteps (b - 2) a b W
+        + ((mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+        + ((mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+        + ((a + 2 + 1) + (a + b * a + 4)))) from by omega]
+  rw [DTM.run_add mulMachine (mulLoopSteps (b - 2) a b W)
+    ((mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+    + ((mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+    + ((a + 2 + 1) + (a + b * a + 4))))]
+  rw [hloop]
+  -- 循环步 `r = b-2`
+  rw [DTM.run_add mulMachine
+    (mulRoundSteps a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) + 1 + (2 * a + 4) + 1)
+    ((mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+    + ((a + 2 + 1) + (a + b * a + 4)))]
+  rw [mulMachine_loop_step a b (b - 2) (W - (b - 2) * a) ((b - 2) * a) ha
+    (by omega) hwa2 L R]
+  rw [show b - 2 + 1 = b - 1 from by omega]
+  rw [show (b - 2) * a + a = (b - 1) * a from by rw [hmulb2]]
+  rw [show W - (b - 2) * a - a = W - (b - 1) * a from by rw [hmulb2, Nat.sub_sub]]
+  -- 最后一轮
+  rw [DTM.run_add mulMachine
+    (mulRoundSteps a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) + 1)
+    ((a + 2 + 1) + (a + b * a + 4))]
+  rw [mulMachine_phase_round a b (b - 1) (W - (b - 1) * a) ((b - 1) * a) ha
+    (by omega) hb1 L R]
+  rw [show b - 1 + 1 = b from by omega]
+  rw [show (b - 1) * a + a = b * a from by rw [hmulb]]
+  rw [show W - (b - 1) * a - a = W - b * a from by rw [hmulb, Nat.sub_sub]]
+  -- 检测「耗尽」
+  rw [hP2, hQ2]
+  rw [DTM.run_add mulMachine (a + 2 + 1) (a + b * a + 4)]
+  rw [mulMachine_phase_check_done a ha
+    (List.replicate (b - 1) (some false) ++ (none :: (none :: L)))
+    (List.replicate (b * a) (some false) ++
+      (none :: (List.replicate (W - b * a) (none : Sym) ++ R)))]
+  -- 收尾相位
+  rw [mulMachine_phase_final a (b * a) ha (by omega)
+    (List.replicate (b - 1) (some false) ++ (none :: (none :: L)))
+    (List.replicate (W - b * a) (none : Sym) ++ R)]
