@@ -201,6 +201,46 @@ theorem unary_dbl_spec (m : Nat) (hm : 1 ≤ m) :
   -- `take`/`drop` 取满整串：展开成 `replicate` 交给 `take_replicate`/`drop_replicate`
   simp [unary, unary_reverse]
 
+/-! ### 多轮倍增 -/
+
+/-- 一轮倍增（三段串联）作用在纸带上（步数按当前计数 `m` 计）。
+    One doubling round on a tape (step counts keyed to the current count `m`). -/
+def dblRound (m : Nat) (t : Tape) : Tape :=
+  moveLeftN (m + m)
+    ((restoreTrue.run (m + m + 1)
+      ⟨(0 : Fin 4),
+        ((doubleStep.run (doubleLoopSteps m 0) ⟨(0 : Fin 4), t⟩).tape)⟩).tape)
+
+/-- `r` 轮倍增：每轮把当前计数翻倍（参数随轮次增长）。 -/
+def dblIter : Nat → Nat → Tape → Tape
+  | 0, _, t => t
+  | r + 1, m, t => dblIter r (m + m) (dblRound m t)
+
+/-- **多轮倍增**：从 `unary m` 出发做 `r` 轮倍增，得到 `unary (m · 2^r)`。
+    `r` doublings starting from `unary m` give `unary (m * 2^r)`. -/
+theorem unary_dblIter (r m : Nat) (hm : 1 ≤ m) :
+    dblIter r m (Tape.mk [none] (unary m ++ [none]))
+      = Tape.mk [none] (unary (m * 2 ^ r) ++ [none]) := by
+  induction r generalizing m with
+  | zero => simp [dblIter]
+  | succ r ih =>
+      rw [dblIter, dblRound, unary_dbl_spec m hm, ih (m + m) (by omega)]
+      -- 指数对齐：`(m + m) * 2^r = m * 2^(r+1)`
+      have h : (m + m) * 2 ^ r = m * 2 ^ (r + 1) := by
+        have hm2 : m + m = m * 2 := by omega
+        rw [hm2, Nat.pow_succ]
+        ac_rfl
+      rw [h]
+
+/-- 从 `1` 出发的多轮倍增：`r` 轮后得到 `unary (2^r)`——
+    #192 提案里的上界计数器 `U = 2^(n*(2k+3))` 正是取 `r = n*(2k+3)`。
+    Starting from `1`, `r` rounds give `unary (2^r)` — the `U` counter of the plan in #192. -/
+theorem unary_dblIter_one (r : Nat) :
+    dblIter r 1 (Tape.mk [none] (unary 1 ++ [none]))
+      = Tape.mk [none] (unary (2 ^ r) ++ [none]) := by
+  rw [unary_dblIter r 1 (by decide)]
+  simp
+
 end DTM
 
 end Pnp

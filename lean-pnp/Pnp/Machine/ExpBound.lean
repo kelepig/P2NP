@@ -47,6 +47,41 @@ theorem bruteForce_cost_le (B c T : Nat) :
         omega
 
 
+/-- **`n ≥ 1` 时 `n^k + k` 被 `2^(n*(2k+3))` 控制**（#194）：这是 #192 提案里
+    「用倍增计数器给出 `T = n^k + k` 的上界 `U`」的算术核心——从 `1` 出发做
+    `n*(2k+3)` 轮倍增恰好得到 `2^(n*(2k+3))`。
+    For `n ≥ 1`, `n^k + k ≤ 2^(n*(2k+3))`: the arithmetic core of the `U`-based plan
+    (#192) — `n*(2k+3)` doublings from `1` produce exactly that bound. -/
+theorem n_pow_k_add_k_le_two_pow (n k : Nat) (hn : 1 ≤ n) :
+    n ^ k + k ≤ 2 ^ (n * (2 * k + 3)) := by
+  -- 第一项：`n^k ≤ 2^(n*k)`
+  have h1 : n ^ k ≤ 2 ^ (n * k) := pow_le_two_pow_mul n k
+  -- 第二项：`k ≤ 2^k ≤ 2^(n*k+1)`
+  have h2 : k ≤ 2 ^ (n * k + 1) := by
+    have hk : k ≤ 2 ^ k := self_le_two_pow k
+    have hmono : 2 ^ k ≤ 2 ^ (n * k + 1) := by
+      apply Nat.pow_le_pow_right (by omega)
+      -- `k ≤ n*k`（`n ≥ 1`），再放大一格
+      have hk' : k ≤ n * k := Nat.le_mul_of_pos_left k (by omega : 0 < n)
+      omega
+    exact Nat.le_trans hk hmono
+  -- 合并：`sum ≤ 3 * 2^(n*k) ≤ 4 * 2^(n*k) = 2^(n*k+2)`
+  have h3 : n ^ k + k ≤ 2 ^ (n * k + 2) := by
+    calc n ^ k + k ≤ 2 ^ (n * k) + 2 ^ (n * k + 1) := Nat.add_le_add h1 h2
+      _ = 2 ^ (n * k) + 2 ^ (n * k) * 2 := by rw [Nat.pow_succ]
+      _ = 2 ^ (n * k) * 3 := by
+          rw [show (3 : Nat) = 2 + 1 from rfl, Nat.mul_succ]
+          exact Nat.add_comm _ _
+      _ ≤ 2 ^ (n * k) * 4 := Nat.mul_le_mul_left _ (by decide)
+      _ = 2 ^ (n * k + 2) := by rw [Nat.pow_add]
+  -- 指数放大：`n*k+2 ≤ n*(2k+3)`
+  refine Nat.le_trans h3 (Nat.pow_le_pow_right (by omega) ?_)
+  have hexp : n * (2 * k + 3) = n * k * 2 + n * 3 := by
+    have h : n * (2 * k) = n * k * 2 := by ac_rfl
+    rw [Nat.mul_add, h]
+  rw [hexp]
+  omega
+
 /-- `n ≥ 2` 时，多项式因子 `a` 被 `n^a` 吸收。 -/
 theorem le_pow_of_two_le {n : Nat} (hn : 2 ≤ n) (a : Nat) : a ≤ n ^ a :=
   Nat.le_trans (self_le_two_pow a) (Nat.pow_le_pow_left hn a)
