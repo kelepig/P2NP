@@ -1067,6 +1067,199 @@ theorem codeCells_reverse_head :
       rw [codeCells_cons, cellCode_of_false (a, false) rfl, List.reverse_append, hE']
       simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append]
 
+
+/-- **末轮转写（区内为空）**：单格源块的完整转写。读 3 + 停 1 + 写 3 + 回 2 + 末轮流 4 = 13 步，
+    停在 `99` 接受，左带为「两个镜像格」的逆序。
+    Last round with an empty region: the single-cell block, 13 steps, halts accepting. -/
+theorem copyCells_roundLastNil (a : Sym) (L2 tail : List Sym) :
+    copyCells.run 13
+      ⟨(⟨10, by omega⟩ : Fin 128),
+        Tape.mk (codeSnd a :: codeFst a :: none :: none :: none :: L2)
+          (some true :: none :: tail)⟩
+      = ⟨(⟨99, by omega⟩ : Fin 128),
+          Tape.mk ((codeCells ([(a, false)] ++ [(a, false)])).reverse ++ L2) (none :: tail)⟩ := by
+  have hi : 2 * bitOf (codeFst a) + bitOf (codeSnd a) < 4 := by
+    have h1 := bitOf_le_one (codeFst a)
+    have h2 := bitOf_le_one (codeSnd a)
+    omega
+  -- 分段：读 3 + 停 1 + 写 3 + 回 2 + 末轮流 (3·1+1)
+  rw [show (13 : Nat) = 3 + (1 + (3 + (2 + (3 * [(a, false)].length + 1)))) from by simp]
+  rw [DTM.run_add copyCells 3 (1 + (3 + (2 + (3 * [(a, false)].length + 1))))]
+  rw [show copyCells.run 3
+        ⟨(⟨10, by omega⟩ : Fin 128),
+          Tape.mk (codeSnd a :: codeFst a :: none :: none :: none :: L2)
+            (some true :: none :: tail)⟩
+      = ⟨(⟨20 + 2 * bitOf (codeFst a) + bitOf (codeSnd a), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      from copyCells_read3 a none (none :: none :: L2) (none :: tail)]
+  rw [show (⟨20 + 2 * bitOf (codeFst a) + bitOf (codeSnd a), by omega⟩ : Fin 128)
+        = (⟨20 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128)
+      from Fin.ext (Nat.add_assoc 20 (2 * bitOf (codeFst a)) (bitOf (codeSnd a)))]
+  rw [DTM.run_add copyCells 1 (3 + (2 + (3 * [(a, false)].length + 1)))]
+  rw [show copyCells.run 1
+        ⟨(⟨20 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      = ⟨(⟨30 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      from copyCells_walkStop (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi
+        (none :: none :: L2)
+        (codeFst a :: codeSnd a :: some false :: none :: tail)]
+  rw [DTM.run_add copyCells 3 (2 + (3 * [(a, false)].length + 1))]
+  rw [show copyCells.run 3
+        ⟨(⟨30 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      = ⟨(⟨42 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (codeFst a :: L2)
+            (codeSnd a :: some false :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      from copyCells_write3 a (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi rfl L2
+        (codeFst a :: codeSnd a :: some false :: none :: tail)]
+  rw [DTM.run_add copyCells 2 (3 * [(a, false)].length + 1)]
+  rw [show copyCells.run 2
+        ⟨(⟨42 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (codeFst a :: L2)
+            (codeSnd a :: some false :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      = ⟨(⟨50 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (some false :: codeSnd a :: codeFst a :: L2)
+            (codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      from copyCells_back2' (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi (codeSnd a) (some false)
+        (codeFst a :: L2) (codeFst a :: codeSnd a :: some false :: none :: tail)]
+  -- 新镜像格的编码并入末轮流匹配形态
+  rw [show codeFst a :: codeSnd a :: some false :: none :: tail
+        = codeCells [(a, false)] ++ none :: tail from by
+    rw [codeCells_pair_false]; rfl]
+  rw [show copyCells.run (3 * [(a, false)].length + 1)
+        ⟨(⟨50 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (some false :: codeSnd a :: codeFst a :: L2)
+            (codeCells [(a, false)] ++ none :: tail)⟩
+      = ⟨(⟨99, by omega⟩ : Fin 128),
+          Tape.mk ((codeCells [(a, false)]).reverse ++
+              some false :: codeSnd a :: codeFst a :: L2) (none :: tail)⟩
+      from copyCells_scanEnd (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi [(a, false)]
+        (by intro p hp; simp only [List.mem_singleton] at hp; rw [hp])
+        (some false :: codeSnd a :: codeFst a :: L2) tail]
+  -- 目标形态：两端各一格的区域逆序
+  rw [show (codeCells [(a, false)]).reverse ++ some false :: codeSnd a :: codeFst a :: L2
+        = (codeCells ([(a, false)] ++ [(a, false)])).reverse ++ L2 from by
+    rw [codeCells_append, codeCells_pair_false, List.reverse_append]
+    simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append,
+      List.append_assoc]]
+
+
+/-- **末轮转写（区内非空）**：区域逆序串写作 `E = some false :: E'`。读 3 步、跨过 `E'`
+    （`|E'| + 2` 步）、左向写镜像格 3 步、回右 2 步、末轮流 `3(|q|+1) + 1` 步，停在 `99`。
+    Last round over a non-empty region `E = some false :: E'`, halting into `99`. -/
+theorem copyCells_roundLast (a : Sym) (q : List (Sym × Bool)) (hq : ∀ p ∈ q, p.2 = false)
+    (E E' : List Sym) (hE : E = (codeCells q).reverse) (hE' : E = some false :: E')
+    (L2 tail : List Sym) :
+    copyCells.run (3 + (E'.length + 2) + 3 + 2 + (3 * (q.length + 1) + 1))
+      ⟨(⟨10, by omega⟩ : Fin 128),
+        Tape.mk (codeSnd a :: codeFst a :: (E ++ none :: none :: none :: L2))
+          (some true :: none :: tail)⟩
+      = ⟨(⟨99, by omega⟩ : Fin 128),
+          Tape.mk ((codeCells ([(a, false)] ++ q ++ [(a, false)])).reverse ++ L2)
+            (none :: tail)⟩ := by
+  -- 走左段前提：`E'` 的符号都是编码符号（非空白）
+  have hl : ∀ y ∈ E', y ≠ none := by
+    intro y hy
+    have hyE : y ∈ E := by rw [hE']; exact List.mem_cons_of_mem _ hy
+    rw [hE] at hyE
+    exact codeCells_ne_none q y (List.mem_reverse.mp hyE)
+  -- 状态码 `i = 2·b1' + b2'`
+  have hi : 2 * bitOf (codeFst a) + bitOf (codeSnd a) < 4 := by
+    have h1 := bitOf_le_one (codeFst a)
+    have h2 := bitOf_le_one (codeSnd a)
+    omega
+  -- 分段：读 3 + 走 (|E'|+2) + 写 3 + 回 2 + 末轮流 (3(|q|+1)+1)
+  rw [show 3 + (E'.length + 2) + 3 + 2 + (3 * (q.length + 1) + 1)
+        = 3 + ((E'.length + 2) + (3 + (2 + (3 * (q.length + 1) + 1)))) from by omega]
+  rw [hE']
+  simp only [List.cons_append]
+  rw [DTM.run_add copyCells 3 ((E'.length + 2) + (3 + (2 + (3 * (q.length + 1) + 1))))]
+  rw [show copyCells.run 3
+        ⟨(⟨10, by omega⟩ : Fin 128),
+          Tape.mk (codeSnd a :: codeFst a :: some false ::
+              (E' ++ none :: none :: none :: L2))
+            (some true :: none :: tail)⟩
+      = ⟨(⟨20 + 2 * bitOf (codeFst a) + bitOf (codeSnd a), by omega⟩ : Fin 128),
+          Tape.mk (E' ++ none :: none :: none :: L2)
+            (some false :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      from copyCells_read3 a (some false) (E' ++ none :: none :: none :: L2) (none :: tail)]
+  rw [show (⟨20 + 2 * bitOf (codeFst a) + bitOf (codeSnd a), by omega⟩ : Fin 128)
+        = (⟨20 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128)
+      from Fin.ext (Nat.add_assoc 20 (2 * bitOf (codeFst a)) (bitOf (codeSnd a)))]
+  rw [DTM.run_add copyCells (E'.length + 2) (3 + (2 + (3 * (q.length + 1) + 1)))]
+  rw [show copyCells.run (E'.length + 2)
+        ⟨(⟨20 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (E' ++ none :: none :: none :: L2)
+            (some false :: codeFst a :: codeSnd a :: some false :: none :: tail)⟩
+      = ⟨(⟨30 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false ::
+              none :: tail)⟩
+      from copyCells_walkL (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi E' hl false
+        (none :: none :: L2)
+        (codeFst a :: codeSnd a :: some false :: none :: tail)]
+  rw [DTM.run_add copyCells 3 (2 + (3 * (q.length + 1) + 1))]
+  rw [show copyCells.run 3
+        ⟨(⟨30 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (none :: none :: L2)
+            (none :: E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false ::
+              none :: tail)⟩
+      = ⟨(⟨42 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (codeFst a :: L2)
+            (codeSnd a :: some false :: E'.reverse ++ some false :: codeFst a :: codeSnd a ::
+              some false :: none :: tail)⟩
+      from copyCells_write3 a (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi rfl L2
+        (E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false :: none :: tail)]
+  rw [DTM.run_add copyCells 2 (3 * (q.length + 1) + 1)]
+  rw [show copyCells.run 2
+        ⟨(⟨42 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (codeFst a :: L2)
+            (codeSnd a :: some false :: E'.reverse ++ some false :: codeFst a :: codeSnd a ::
+              some false :: none :: tail)⟩
+      = ⟨(⟨50 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (some false :: codeSnd a :: codeFst a :: L2)
+            (E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false ::
+              none :: tail)⟩
+      from copyCells_back2' (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi (codeSnd a) (some false)
+        (codeFst a :: L2)
+        (E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false :: none :: tail)]
+  -- 区域逆序串还原成区域编码，再并上新格编码（供末轮流匹配）
+  rw [show E'.reverse ++ some false :: codeFst a :: codeSnd a :: some false :: none :: tail
+        = codeCells (q ++ [(a, false)]) ++ none :: tail from by
+    rw [rev_cons_append E E' hE' (codeFst a :: codeSnd a :: some false :: none :: tail)]
+    rw [hE, List.reverse_reverse]
+    exact (codeCells_snoc_false q a (none :: tail)).symm]
+  rw [show 3 * (q.length + 1) + 1 = 3 * (q ++ [(a, false)]).length + 1 from by simp]
+  rw [show copyCells.run (3 * (q ++ [(a, false)]).length + 1)
+        ⟨(⟨50 + (2 * bitOf (codeFst a) + bitOf (codeSnd a)), by omega⟩ : Fin 128),
+          Tape.mk (some false :: codeSnd a :: codeFst a :: L2)
+            (codeCells (q ++ [(a, false)]) ++ none :: tail)⟩
+      = ⟨(⟨99, by omega⟩ : Fin 128),
+          Tape.mk ((codeCells (q ++ [(a, false)])).reverse ++
+              some false :: codeSnd a :: codeFst a :: L2) (none :: tail)⟩
+      from copyCells_scanEnd (2 * bitOf (codeFst a) + bitOf (codeSnd a)) hi (q ++ [(a, false)])
+        (by
+          intro p hp
+          rcases List.mem_append.mp hp with hp | hp
+          · exact hq p hp
+          · simp only [List.mem_singleton] at hp
+            rw [hp])
+        (some false :: codeSnd a :: codeFst a :: L2) tail]
+  rw [show (codeCells (q ++ [(a, false)])).reverse ++ some false :: codeSnd a :: codeFst a :: L2
+        = (codeCells ([(a, false)] ++ q ++ [(a, false)])).reverse ++ L2 from by
+    rw [codeCells_append, codeCells_append, codeCells_pair_false, List.reverse_append,
+      List.reverse_append]
+    simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append]
+    rw [codeCells_cons, cellCode_of_false (a, false) rfl, List.reverse_append]
+    simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append,
+      List.singleton_append, List.append_assoc]]
+  rfl
+
 end DTM
 
 end Pnp
