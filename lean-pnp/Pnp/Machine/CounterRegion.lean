@@ -2326,3 +2326,62 @@ theorem readWriteSeg_run_pad (B k : Nat) (hkB : k + 1 ≤ B) (a₀ : Sym)
     rw [List.replicate_append_replicate]
     rw [show k + 2 + (k + 1) = 2 * k + 3 from by omega]]
 
+/-- 真格串里没有空白格。 A run of trues contains no blank. -/
+theorem mem_replicate_true_ne_none (n : Nat) :
+    ∀ x ∈ List.replicate n (some true), x ≠ none := by
+  intro x hx hxnone
+  have h : x = some true := List.eq_of_mem_replicate hx
+  rw [h] at hxnone
+  exact absurd hxnone (by decide)
+
+
+/-- 一轮的纸带变换（函数式陈述）：`groupRoundTape B k q t` 依次跑读段写块、右掠、找下一段。
+    One round of the group loop as a tape map. -/
+def groupRoundTape (B k q : Nat) (t : Tape) : Tape :=
+  ((seekSegR.run (1 + q + 1)
+    (Config.mk (0 : Fin 3)
+      ((skipNonBlankR.run (2 * k + 4)
+        (Config.mk (0 : Fin 2)
+          ((readWriteSeg B).run (2 * k + 5)
+            (Config.mk (⟨0, by omega⟩ : Fin (2 * B + 6)) t)).tape))).tape))).tape
+
+theorem groupRound_run (B k q : Nat) (hkB : k + 1 ≤ B) (hq : 1 ≤ q)
+    (a₀ : Sym) (h₀ : a₀ ≠ some true) (L R : List Sym) (hlen : k + 2 ≤ L.length) :
+    groupRoundTape B k q
+        (Tape.mk (List.replicate k (some true) ++ a₀ :: L)
+          (some true :: (none :: (List.replicate q (some true) ++ (none :: R)))))
+      = Tape.mk (List.replicate (q - 1) (some true)
+          ++ (none :: (List.replicate (2 * k + 3) (some true) ++ (some false :: L.drop (k + 2)))))
+        (some true :: (none :: R)) := by
+  show ((seekSegR.run (1 + q + 1)
+        (Config.mk (0 : Fin 3)
+          ((skipNonBlankR.run (2 * k + 4)
+            (Config.mk (0 : Fin 2)
+              ((readWriteSeg B).run (2 * k + 5)
+                (Config.mk (⟨0, by omega⟩ : Fin (2 * B + 6))
+                  (Tape.mk (List.replicate k (some true) ++ a₀ :: L)
+                    (some true :: (none :: (List.replicate q (some true) ++ (none :: R))))))).tape))).tape))).tape
+      = _
+  rw [readWriteSeg_run_pad B k hkB a₀ h₀ L (List.replicate q (some true) ++ (none :: R)) hlen]
+  rw [show 2 * k + 4 = (List.replicate (2 * k + 3) (some true)).length + 1 from by
+    rw [List.length_replicate]]
+  rw [skipNonBlankR_run (List.replicate (2 * k + 3) (some true))
+    (mem_replicate_true_ne_none (2 * k + 3)) (some false :: L.drop (k + 2))
+    (List.replicate q (some true) ++ (none :: R))]
+  rw [List.reverse_replicate]
+  rw [show none :: (List.replicate q (some true) ++ (none :: R))
+      = (List.replicate (1 : Nat) none ++ List.replicate q (some true)) ++ (none :: R) from by
+    rw [show List.replicate (1 : Nat) none = ([none] : List Sym) from rfl,
+      List.singleton_append, List.cons_append]]
+  rw [seekSegR_run 1 q (by omega) hq
+    (List.replicate (2 * k + 3) (some true) ++ some false :: L.drop (k + 2)) R]
+  rw [show (List.replicate (q - 1) (some true) ++ List.replicate (1 : Nat) none)
+        ++ (List.replicate (2 * k + 3) (some true) ++ some false :: L.drop (k + 2))
+      = List.replicate (q - 1) (some true)
+        ++ (none :: (List.replicate (2 * k + 3) (some true) ++ some false :: L.drop (k + 2))) from by
+    rw [show List.replicate (1 : Nat) none = ([none] : List Sym) from rfl,
+      List.append_assoc, List.singleton_append]]
+
+/-! ### 数字区组循环的一轮（纸带级） -/
+
+
