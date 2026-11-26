@@ -1083,3 +1083,140 @@ theorem mulRoundCheck_run (a b r w d : Nat) (ha : 1 ≤ a) (hb : r + 2 ≤ b) (h
   simp only [mulL, mulR, List.replicate_zero, List.nil_append]
   rw [hshape]
   exact hrun
+
+/-! ### 收尾相位 `mulFinal`（从 B 的耗尽位置走到副本区并统一） -/
+
+/-- 收尾相位机（4 状态，3 为停机态）：耗尽检测停在 B 的最近格上，本机右行跨过分隔空白、
+    跳过 A 的全部 `some true`、跨过 `sepA`，再把副本区的 `some false` 逐格改回 `some true`，
+    遇前沿空白接受。
+    The final phase machine: starting on B's nearest (exhausted) cell, walk right across the
+    blank and all of A, cross `sepA`, flip the copy area's falses back to trues, and accept on
+    the frontier blank. -/
+def mulFinal : DTM 4 where
+  step := fun s a =>
+    match s.val with
+    | 0 => (match a with
+       | some false => (⟨0, by omega⟩, some false, Dir.right)
+       | none => (⟨1, by omega⟩, none, Dir.right)
+       | some true => (⟨1, by omega⟩, some true, Dir.right))
+    | 1 => (match a with
+       | some true => (⟨1, by omega⟩, some true, Dir.right)
+       | none => (⟨2, by omega⟩, none, Dir.right)
+       | some false => (⟨2, by omega⟩, some false, Dir.right))
+    | 2 => (match a with
+       | some false => (⟨2, by omega⟩, some true, Dir.right)
+       | none => (⟨3, by omega⟩, none, Dir.stay)
+       | some true => (⟨2, by omega⟩, some true, Dir.right))
+    | _ => (s, a, Dir.stay)
+  start := 0
+  accept := 3
+  reject := 3
+
+/-- 非 3 状态一律不停机。 States other than 3 never halt. -/
+theorem mulFinal_halted_ne (st : Nat) (hst : st < 4) (h : st ≠ 3) (t : Tape) :
+    mulFinal.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulFinal.accept.val = 3 from rfl] at hv
+    exact h hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulFinal.reject.val = 3 from rfl] at hv
+    exact h hv
+
+/-- `mulFinal` 的单步运行套路。 The one-step idiom for `mulFinal`. -/
+theorem estepMF2 (st : Nat) (hst : st < 4) (a : Sym) (q' : Fin 4) (s : Sym) (d : Dir)
+    (h : mulFinal.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 3) :
+    mulFinal.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
+      = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
+  rw [show (1 : Nat) = 0 + 1 from rfl]
+  rw [DTM.run_succ_of_not_halted _ 0 _ (mulFinal_halted_ne st hst hne _)]
+  exact stepConfig_of_step mulFinal ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩ q' s d h
+
+/-- 状态 1 右行跳过 `m` 个 `some true` 并停在空白上（`m` 步）。
+    State 1 walks right over `m` trues and stops on the blank, in `m` steps. -/
+theorem mulFinal_skipT : ∀ (m : Nat) (P R : List Sym),
+    mulFinal.run m
+      ⟨(⟨1, by omega⟩ : Fin 4),
+        Tape.mk P (List.replicate m (some true) ++ (none :: R))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate m (some true) ++ P) (none :: R)⟩
+  | 0, P, R => by
+      simp [DTM.run]
+  | m + 1, P, R => by
+      conv =>
+        lhs
+        rw [List.replicate_succ, List.cons_append]
+        rw [show m + 1 = 1 + m from by omega]
+      rw [DTM.run_add mulFinal 1 m]
+      rw [estepMF2 1 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [mulFinal_skipT m (some true :: P) R]
+      rw [replicate_succ_append m (some true) P]
+
+/-- 状态 2 把 `d` 个 `some false` 逐格改回 `some true`（头停在随后的空白上）。
+    State 2 flips `d` falses back to trues and stops on the following blank. -/
+theorem mulFinal_conv : ∀ (d : Nat) (P R : List Sym),
+    mulFinal.run d
+      ⟨(⟨2, by omega⟩ : Fin 4),
+        Tape.mk P (List.replicate d (some false) ++ (none :: R))⟩
+      = ⟨(⟨2, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate d (some true) ++ P) (none :: R)⟩
+  | 0, P, R => by
+      simp [DTM.run]
+  | d + 1, P, R => by
+      conv =>
+        lhs
+        rw [List.replicate_succ, List.cons_append]
+        rw [show d + 1 = 1 + d from by omega]
+      rw [DTM.run_add mulFinal 1 d]
+      rw [estepMF2 2 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [mulFinal_conv d (some true :: P) R]
+      rw [replicate_succ_append d (some true) P]
+
+/-- **收尾整段**：`a + d + 4` 步——从 B 的最近格右行跨空白、跳过 A 的全部格、跨 `sepA`，
+    把 `d` 个副本格改回 `some true`，遇前沿空白接受。
+    The whole final phase in `a + d + 4` steps. -/
+theorem mulFinal_run (a d : Nat) (ha : 1 ≤ a) (hd : 1 ≤ d) (P R : List Sym) :
+    mulFinal.run (a + d + 4)
+      ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk P (some false :: (none ::
+          (List.replicate (a - 1) (some true) ++
+            (some true :: (none :: (List.replicate d (some false) ++ (none :: R)))))))⟩
+      = ⟨(⟨3, by omega⟩ : Fin 4),
+          Tape.mk (List.replicate d (some true) ++
+            (none :: (List.replicate a (some true) ++ (none :: (some false :: P)))))
+            (none :: R)⟩ := by
+  rcases a with _ | a'
+  · omega
+  simp only [Nat.add_sub_cancel]
+  -- 步数分解：1（离开 B 最近格）+ 1（跨空白进 A）+ (a'+1)（跳过 A）+ 1（跨 `sepA`）+ d + 1
+  rw [show a' + 1 + d + 4 = 1 + (1 + ((a' + 1) + (1 + (d + 1)))) from by omega]
+  rw [DTM.run_add mulFinal 1 (1 + ((a' + 1) + (1 + (d + 1))))]
+  -- 状态 0：离开 B 的最近格，落在空白上
+  rw [estepMF2 0 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 状态 0：跨过空白，进 A 的最左格
+  rw [DTM.run_add mulFinal 1 ((a' + 1) + (1 + (d + 1)))]
+  rw [estepMF2 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 状态 1：右行跳过 A 的全部格（`replicate a' ++ some true = replicate (a'+1)`）
+  rw [DTM.run_add mulFinal (a' + 1) (1 + (d + 1))]
+  rw [replicate_succ_append a' (some true)
+    (none :: (List.replicate d (some false) ++ (none :: R)))]
+  rw [mulFinal_skipT (a' + 1) (none :: (some false :: P))
+    (List.replicate d (some false) ++ (none :: R))]
+  -- 状态 1：跨过 `sepA`，进副本区首格
+  rw [DTM.run_add mulFinal 1 (d + 1)]
+  rw [estepMF2 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 状态 2：逐格统一副本区
+  rw [DTM.run_add mulFinal d 1]
+  rw [mulFinal_conv d
+    (none :: (List.replicate (a' + 1) (some true) ++ (none :: (some false :: P)))) R]
+  -- 状态 2：遇前沿空白接受
+  rw [estepMF2 2 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+  simp [Tape.write, Tape.move]
