@@ -126,6 +126,18 @@ theorem exists_branch_iff_exists_index (B T : Nat) (hBpos : 0 < B) (hT : 0 < T)
       branchOfIndex_fst_le B T j hBpos hT hj,
       branchOfIndex_snd_lt B T j hBpos, hP⟩
 
+/-- **计数器遍历 = 存在量化**：`List.range n` 上的 `any` 为真，当且仅当存在 `j < n` 使其为真。
+    这是 E 外层循环「跑完所有分支、任一命中即接受」的列表层规格。
+    Scanning the counter range with `any` equals an existential over `j < n`. -/
+theorem any_range_iff_exists (P : Nat → Bool) (n : Nat) :
+    (List.range n).any P = true ↔ ∃ j, j < n ∧ P j = true := by
+  rw [List.any_eq_true]
+  constructor
+  · rintro ⟨j, hj, hP⟩
+    exact ⟨j, List.mem_range.mp hj, hP⟩
+  · rintro ⟨j, hj, hP⟩
+    exact ⟨j, List.mem_range.mpr hj, hP⟩
+
 end DTM
 
 end Pnp
