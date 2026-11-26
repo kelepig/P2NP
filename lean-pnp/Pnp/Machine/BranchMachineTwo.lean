@@ -14,6 +14,7 @@
 -/
 
 import Pnp.Machine.BranchMachine
+import Pnp.Machine.PadConflict
 import Pnp.Machine.AlignChainTwo
 
 namespace Pnp
@@ -469,6 +470,77 @@ theorem branchMachine_hpad_two {q : Nat} (M : NTM q) (w : List Bool) (Z T B b m 
     Reg.initReg_post_length M.start w (T + 1) m
   rw [hpost]
   omega
+
+/-- **逐分支右垫的推荐取值**：单轮成本 + 逐分支预算 + 1（关于 `T` 的多项式）。
+    Recommended right-pad size: one round's cost plus the per-branch budget. -/
+def branchPad {q : Nat} (st : Fin q) (w : List Bool) (Z T B b : Nat) : Nat :=
+  roundCostStay (Reg.initReg st w (T + 1) 0) Z B (Reg.initReg st w (T + 1) 0).cur
+    + branchBudget (T + 1) Z T B b + 1
+
+/-- `branchPad` 至少为 `T`：单轮成本已含 `6(T+1)` 的码长。
+    `branchPad` dominates `T` because one round costs at least `6(T+1)`. -/
+theorem branchPad_ge_T {q : Nat} (st : Fin q) (w : List Bool) (Z T B b : Nat) (hT : 0 < T) :
+    T ≤ branchPad st w Z T B b := by
+  unfold branchPad
+  have h := roundCostStay_ge_pre (Reg.initReg st w (T + 1) 0) Z B
+    (Reg.initReg st w (T + 1) 0).cur
+  rw [Reg.initReg_pre_length] at h
+  omega
+
+/-- `branchPad` 至少为 `T+1`（右侧预留判据的要求）。 -/
+theorem branchPad_ge_succ {q : Nat} (st : Fin q) (w : List Bool) (Z T B b : Nat) :
+    T + 1 ≤ branchPad st w Z T B b := by
+  unfold branchPad
+  have h := roundCostStay_ge_pre (Reg.initReg st w (T + 1) 0) Z B
+    (Reg.initReg st w (T + 1) 0).cur
+  rw [Reg.initReg_pre_length] at h
+  omega
+
+/-- `branchPad` 非零。 -/
+theorem branchPad_pos {q : Nat} (st : Fin q) (w : List Bool) (Z T B b : Nat) :
+    1 ≤ branchPad st w Z T B b := by
+  unfold branchPad
+  omega
+
+set_option maxHeartbeats 2000000 in
+/-- **逐分支判定机：单条等价（前提全自动）**：右垫取 `branchPad`（多项式）后，
+    三件前提（左右预留、右长覆盖）全部自动成立；E 的逐分支循环体可直接引用本条。
+    Per-branch equivalence with all pad premises discharged automatically. -/
+theorem branchMachine_dummy_iff_two_auto {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
+    (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z : Nat) (hZT : Z ≤ T + 1)
+    (R : List Sym) (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject) :
+    (∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (branchPad M.start w Z T B b - 1)).length + 1
+            + (3 * branchPad M.start w Z T B b + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)) Z B
+                (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).cur
+              + branchBudget (Reg.initReg M.start w (T + 1) (branchPad M.start w Z T B b)).pre.length
+                  Z T B b))
+        ⟨(seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+            (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr T ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (branchPad M.start w Z T B b - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (branchPad M.start w Z T B b - 1))
+          (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept) ↔
+      M.AcceptsWithin w T := by
+  have hm : 1 ≤ branchPad M.start w Z T B b := branchPad_pos M.start w Z T B b
+  have hd1 : T ≤ branchPad M.start w Z T B b := branchPad_ge_T M.start w Z T B b hT
+  exact branchMachine_dummy_iff_two M w a l' hw hl hB hBpos T b hbnd hT Z
+    (branchPad M.start w Z T B b) hm hZT R hd1 hxacc hxre
+    (fun t i ht1 htT => branchMachine_post_ok_two M w T _ t i hT ht1 htT
+      (branchPad_ge_succ M.start w Z T B b))
+    (fun t i ht1 htT => branchMachine_pre_ok_two M w T _ t i hT ht1 htT)
+    (branchMachine_hpad_two M w Z T B b _ (Nat.le_refl _))
 
 end DTM
 
