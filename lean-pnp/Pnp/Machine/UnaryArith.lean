@@ -201,6 +201,115 @@ theorem unary_dbl_spec (m : Nat) (hm : 1 ≤ m) :
   -- `take`/`drop` 取满整串：展开成 `replicate` 交给 `take_replicate`/`drop_replicate`
   simp [unary, unary_reverse]
 
+/-- **带远端左上下文的 unary 倍增循环**（#195）。 Unary doubling loop with far left context. -/
+theorem double_loop_trailing_ctx (r k : Nat) (L : List Sym) :
+    doubleStep.run (doubleLoopSteps (r + 1) k)
+      { state := (0 : Fin 4),
+        tape := { left := [none] ++ L,
+                  right := List.replicate k (some false) ++
+                           List.replicate (r + 1) (some true) ++
+                           List.replicate k (some false) ++ [none] } } =
+    { state := (0 : Fin 4),
+      tape := { left := [none] ++ L,
+                right := List.replicate (k + (r + 1)) (some false) ++
+                         List.replicate (k + (r + 1)) (some false) } } := by
+  have hshape : List.replicate k (some false) ++ List.replicate (r + 1) (some true) ++
+      List.replicate k (some false) ++ [none] =
+      List.replicate k (some false) ++ some true ::
+        (List.replicate r (some true) ++ List.replicate k (some false) ++ [none]) := by
+    simp only [List.replicate_succ', List.append_assoc, List.cons_append,
+      List.nil_append]
+    rw [cons_replicate_append]
+  rw [hshape]
+  rw [show doubleLoopSteps (r + 1) k = doubleIterSteps r k + doubleLoopSteps r (k + 1)
+    from rfl]
+  rw [DTM.run_add, double_iter_ctx r k [none] (Or.inr rfl) L, double_loop_ctx r (k + 1) L]
+  simp [Nat.add_comm, Nat.add_left_comm]
+
+/-- unary 形态的带尾空白、带左上下文的倍增循环（`m ≥ 1`）。
+    Unary trailing-blank doubling loop with a far left context. -/
+theorem unary_double_trailing_ctx (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    doubleStep.run (doubleLoopSteps m 0)
+      ⟨(0 : Fin 4), Tape.mk ([none] ++ L) (unary m ++ [none])⟩
+      = ⟨(0 : Fin 4), Tape.mk ([none] ++ L) (unaryF m ++ unaryF m)⟩ := by
+  obtain ⟨r, rfl⟩ : ∃ r, m = r + 1 := ⟨m - 1, by omega⟩
+  simpa only [unary, unaryF, Nat.zero_add, List.replicate_zero, List.nil_append,
+    List.append_nil] using double_loop_trailing_ctx r 0 L
+
+/-- **带远端左上下文的倍增收尾**（#195）：`restoreTrue` 在左侧带内容 `L` 时同样
+    把 `unaryF m ++ unaryF m` 恢复成 `unary (2m)`，`L` 原样保留。
+    The restore stage with a far left context `L`, preserved. -/
+theorem unary_double_restore_ctx (m : Nat) (L : List Sym) :
+    restoreTrue.run (m + m + 1)
+      ⟨(0 : Fin 4), Tape.mk ([none] ++ L) (unaryF m ++ unaryF m)⟩
+      = ⟨(2 : Fin 4), Tape.mk (unary (m + m) ++ ([none] ++ L)) [none]⟩ := by
+  have hne : ∀ x ∈ unaryF m ++ unaryF m, x ≠ none := by
+    intro x hx
+    rcases List.mem_append.1 hx with h | h
+    · exact unaryF_ne_none m x h
+    · exact unaryF_ne_none m x h
+  have hlen : (unaryF m ++ unaryF m).length = m + m := by
+    simp [unaryF_length]
+  rw [show m + m + 1 = (unaryF m ++ unaryF m).length + 1 from by rw [hlen]]
+  rw [restoreTrue_run' ([none] ++ L) (unaryF m ++ unaryF m) hne]
+  simp only [unaryF_map_true, unary_reverse]
+
+/-- **带左上下文的完整 unary 倍增规格（三段）**（#195）：块左侧空白之外还有内容 `L` 时，
+    倍增把 `unary m` 变成 `unary (2m)`，`L` 原样保留。
+    The full unary doubling spec with a far left context `L`, preserved throughout. -/
+theorem unary_dbl_spec_ctx (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    moveLeftN (m + m)
+      ((restoreTrue.run (m + m + 1)
+        ⟨(0 : Fin 4),
+          ((doubleStep.run (doubleLoopSteps m 0)
+            ⟨(0 : Fin 4), Tape.mk ([none] ++ L) (unary m ++ [none])⟩).tape)⟩).tape)
+      = Tape.mk ([none] ++ L) (unary (m + m) ++ [none]) := by
+  have h1 : (doubleStep.run (doubleLoopSteps m 0)
+      ⟨(0 : Fin 4), Tape.mk ([none] ++ L) (unary m ++ [none])⟩).tape
+      = Tape.mk ([none] ++ L) (unaryF m ++ unaryF m) := by
+    rw [unary_double_trailing_ctx m hm L]
+  rw [h1]
+  rw [unary_double_restore_ctx m L]
+  rw [moveLeftN_append (m + m) (unary (m + m)) ([none] ++ L) [none]
+    (by simp [unary_length])]
+  -- `take`/`drop` 取满整串
+  simp [unary, unary_reverse]
+
+/-- 带左上下文的一轮倍增（三段串联）。 One doubling round with a far left context. -/
+def dblRoundCtx (m : Nat) (L : List Sym) (t : Tape) : Tape :=
+  moveLeftN (m + m)
+    ((restoreTrue.run (m + m + 1)
+      ⟨(0 : Fin 4),
+        ((doubleStep.run (doubleLoopSteps m 0) ⟨(0 : Fin 4), t⟩).tape)⟩).tape)
+
+/-- 带左上下文的 `r` 轮倍增。 `r` doubling rounds with a far left context. -/
+def dblIterCtx : Nat → Nat → List Sym → Tape → Tape
+  | 0, _, _, t => t
+  | r + 1, m, L, t => dblIterCtx r (m + m) L (dblRoundCtx m L t)
+
+/-- **带左上下文的多轮倍增**（#195）：`L` 侧内容保持不动，计数 `m ↦ m·2^r`。
+    Multi-round doubling with a far left context: `L` is preserved and `m ↦ m * 2^r`. -/
+theorem unary_dblIter_ctx (r m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblIterCtx r m L (Tape.mk ([none] ++ L) (unary m ++ [none]))
+      = Tape.mk ([none] ++ L) (unary (m * 2 ^ r) ++ [none]) := by
+  induction r generalizing m with
+  | zero => simp [dblIterCtx]
+  | succ r ih =>
+      rw [dblIterCtx, dblRoundCtx, unary_dbl_spec_ctx m hm L, ih (m + m) (by omega)]
+      have h : (m + m) * 2 ^ r = m * 2 ^ (r + 1) := by
+        have hm2 : m + m = m * 2 := by omega
+        rw [hm2, Nat.pow_succ]
+        ac_rfl
+      rw [h]
+
+/-- 从 `1` 出发、带左上下文的多轮倍增：`r` 轮后得到 `unary (2^r)`。
+    Starting from `1` with a far left context: `r` rounds give `unary (2^r)`. -/
+theorem unary_dblIter_one_ctx (r : Nat) (L : List Sym) :
+    dblIterCtx r 1 L (Tape.mk ([none] ++ L) (unary 1 ++ [none]))
+      = Tape.mk ([none] ++ L) (unary (2 ^ r) ++ [none]) := by
+  rw [unary_dblIter_ctx r 1 (by decide) L]
+  simp
+
 /-! ### 多轮倍增 -/
 
 /-- 一轮倍增（三段串联）作用在纸带上（步数按当前计数 `m` 计）。

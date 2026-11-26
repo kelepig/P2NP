@@ -231,6 +231,66 @@ theorem double_back (P r : List Sym) (x : Sym)
       rw [ih (x :: r) p hps hp]
       simp [List.reverse_cons, List.append_assoc]
 
+/-- **带远端左上下文的回扫**（#195）：块左边界空白之外还有内容 `L` 时，
+    回扫只在块内进行，`L` 原样保留。
+    The back scan with a far left context `L` beyond the boundary blank. -/
+theorem double_back_ctx (P r L : List Sym) (x : Sym)
+    (hP : ∀ y ∈ P, y ≠ none) (hx : x ≠ none) :
+    doubleStep.run (P.length + 2)
+      { state := (2 : Fin 4),
+        tape := { left := P ++ [none] ++ L, right := x :: r } } =
+    { state := (0 : Fin 4),
+      tape := { left := [none] ++ L, right := P.reverse ++ x :: r } } := by
+  induction P generalizing r x L with
+  | nil =>
+      have h0 : doubleStep.halted
+          { state := (2 : Fin 4),
+            tape := { left := ([] : List Sym) ++ [none] ++ L, right := x :: r } } = false := by
+        simp [DTM.halted, doubleStep]
+      have hstep1 : doubleStep.stepConfig
+          { state := (2 : Fin 4),
+            tape := { left := ([] : List Sym) ++ [none] ++ L, right := x :: r } }
+          = { state := (2 : Fin 4),
+              tape := { left := ([] : List Sym) ++ L, right := none :: x :: r } } := by
+        simp [DTM.stepConfig, doubleStep, Tape.read, Tape.write, Tape.move,
+              Tape.moveLeft, hx]
+      have h1 : doubleStep.halted
+          { state := (2 : Fin 4),
+            tape := { left := ([] : List Sym) ++ L, right := none :: x :: r } } = false := by
+        simp [DTM.halted, doubleStep]
+      have hstep2 : doubleStep.stepConfig
+          { state := (2 : Fin 4),
+            tape := { left := ([] : List Sym) ++ L, right := none :: x :: r } }
+          = { state := (0 : Fin 4),
+              tape := { left := [none] ++ L, right := x :: r } } := by
+        simp [DTM.stepConfig, doubleStep, Tape.read, Tape.write, Tape.move,
+              Tape.moveRight]
+      change doubleStep.run ((0 + 1) + 1) _ = _
+      rw [DTM.run_succ_of_not_halted doubleStep (0 + 1) _ h0, hstep1,
+          DTM.run_succ_of_not_halted doubleStep 0 _ h1, hstep2]
+      simp [DTM.run]
+  | cons p ps ih =>
+      have hp : p ≠ none := hP p List.mem_cons_self
+      have hps : ∀ y ∈ ps, y ≠ none :=
+        fun y hy => hP y (List.mem_cons_of_mem _ hy)
+      have hhalt : doubleStep.halted
+          { state := (2 : Fin 4),
+            tape := { left := (p :: ps) ++ [none] ++ L, right := x :: r } } = false := by
+        simp [DTM.halted, doubleStep]
+      have hstep : doubleStep.stepConfig
+          { state := (2 : Fin 4),
+            tape := { left := (p :: ps) ++ [none] ++ L, right := x :: r } }
+          = { state := (2 : Fin 4),
+              tape := { left := ps ++ [none] ++ L, right := p :: x :: r } } := by
+        simp [DTM.stepConfig, doubleStep, Tape.read, Tape.write, Tape.move,
+              Tape.moveLeft, hx]
+      simp only [List.length_cons]
+      change doubleStep.run (((ps.length + 1) + 1) + 1) _ = _
+      rw [DTM.run_succ_of_not_halted doubleStep ((ps.length + 1) + 1) _ hhalt, hstep]
+      change doubleStep.run (ps.length + 2) _ = _
+      rw [ih (x :: r) L p hps hp]
+      simp [List.reverse_cons, List.append_assoc]
+
 /-- 辅助：把一个元素移到等值 `replicate` 块的左侧是安全的。 -/
 theorem cons_replicate_append (a : Sym) (k : Nat) (X : List Sym) :
     a :: (List.replicate k a ++ X) = List.replicate k a ++ (a :: X) := by
@@ -347,10 +407,144 @@ theorem double_iter (m k : Nat) (e : List Sym) (he : e = [] ∨ e = [none]) :
   rw [hUexp]
   simp [List.reverse_append, List.append_assoc, List.replicate_succ', cons_replicate_append]
 
+/-- **带远端左上下文的一次完整迭代**（#195）：左端空白之外还有内容 `L` 时，
+    一轮迭代的行为与原版 `double_iter` 相同，`L` 原样保留。
+    One iteration with a far left context `L` beyond the boundary blank; `L` is untouched.
+    一次完整迭代：从状态 0、块首出发，
+    `false^k ++ true^(m+1) ++ false^k`（末端 `e` 可为空或一个空白）
+    在若干步后变回状态 0、块首，块变为 `false^(k+1) ++ true^m ++ false^(k+1)`。
+    An iteration: from state 0 at the block start, the block gains one processed cell. -/
+theorem double_iter_ctx (m k : Nat) (e : List Sym) (he : e = [] ∨ e = [none])
+    (L : List Sym) :
+    doubleStep.run (doubleIterSteps m k)
+      { state := (0 : Fin 4),
+        tape := { left := [none] ++ L,
+                  right := List.replicate k (some false) ++ some true ::
+                           (List.replicate m (some true) ++ List.replicate k (some false) ++ e) } } =
+    { state := (0 : Fin 4),
+      tape := { left := [none] ++ L,
+                right := List.replicate (k + 1) (some false) ++
+                         List.replicate m (some true) ++
+                         List.replicate (k + 1) (some false) } } := by
+  dsimp only [doubleIterSteps]
+  -- 块内元素全非空白
+  have hblk : ∀ y ∈ List.replicate m (some true) ++ List.replicate k (some false),
+      y ≠ none := by
+    intro y hy
+    rcases List.mem_append.mp hy with h | h
+    · rw [List.mem_replicate] at h
+      rcases h with ⟨_, rfl⟩
+      simp
+    · rw [List.mem_replicate] at h
+      rcases h with ⟨_, rfl⟩
+      simp
+  have hR : List.replicate (k + 1) (some false) ≠ [] := by simp
+  have hU : ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false)) ≠ [] :=
+    List.append_ne_nil_of_right_ne_nil _ hR
+  -- U 的展开式
+  have hUexp : ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false)) =
+      List.replicate k (some false) ++ List.replicate m (some true) ++
+        List.replicate (k + 1) (some false) := by
+    simp [List.append_assoc]
+  -- U 的元素全非空白
+  have hAll : ∀ y ∈ ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false)), y ≠ none := by
+    intro y hy
+    rw [hUexp] at hy
+    rcases List.mem_append.mp hy with hy | hy
+    · rcases List.mem_append.mp hy with hy | hy
+      · rw [List.mem_replicate] at hy
+        rcases hy with ⟨_, rfl⟩
+        simp
+      · rw [List.mem_replicate] at hy
+        rcases hy with ⟨_, rfl⟩
+        simp
+    · rw [List.mem_replicate] at hy
+      rcases hy with ⟨_, rfl⟩
+      simp
+  have hP : ∀ y ∈ (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false))).tail, y ≠ none :=
+    fun y hy => hAll y (List.mem_of_mem_tail hy)
+  have hx : (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false))).headD none ≠ none := by
+    cases h : ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+        List.replicate (k + 1) (some false)) with
+    | nil => exact absurd h hU
+    | cons a as =>
+        have ha : a ≠ none := hAll a (by rw [h]; exact List.mem_cons_self)
+        simpa [h] using ha
+  -- toEnd 终态与 back 入口的形状换算
+  have hleft : (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      (List.replicate (k + 1) (some false) ++ ([none] ++ L))).tail) =
+      (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+        List.replicate (k + 1) (some false)).tail) ++ ([none] ++ L) := by
+    rw [← List.append_assoc, List.tail_append_of_ne_nil hU]
+  have hhead : (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      (List.replicate (k + 1) (some false) ++ ([none] ++ L))).headD none) =
+      (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+        List.replicate (k + 1) (some false)).headD none) := by
+    rw [← List.append_assoc]
+    cases h : ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+        List.replicate (k + 1) (some false)) with
+    | nil => simp
+    | cons a as => simp
+  -- 三段拼接
+  rw [DTM.run_add]
+  rw [double_seek_block ([none] ++ L) k
+      (List.replicate m (some true) ++ List.replicate k (some false) ++ e)]
+  rw [DTM.run_add]
+  rw [double_toEnd (List.replicate (k + 1) (some false) ++ ([none] ++ L))
+      (List.replicate m (some true) ++ List.replicate k (some false)) hblk e he]
+  rw [hleft, hhead]
+  rw [← List.append_assoc]
+  rw [double_back_ctx (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false)).tail) [some false] L
+      (((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+        List.replicate (k + 1) (some false)).headD none) hP hx]
+  rw [back_cat ((List.replicate m (some true) ++ List.replicate k (some false)).reverse ++
+      List.replicate (k + 1) (some false)) hU]
+  rw [hUexp]
+  simp [List.reverse_append, List.append_assoc, List.replicate_succ', cons_replicate_append]
+
 /-- 循环总步数：处理 `r` 个剩余源格的累计步数（`k` 为已处理格数）。 -/
 def doubleLoopSteps : Nat → Nat → Nat
   | 0, _ => 0
   | r + 1, k => doubleIterSteps r k + doubleLoopSteps r (k + 1)
+
+/-- **带远端左上下文的倍增主循环**（#195）：块左侧空白之外还有内容 `L` 时，
+    循环行为不变，`L` 原样保留。
+    The doubling loop with a far left context `L`: the loop is unaffected and `L` is kept.
+    倍增主循环：块 `false^k ++ true^r ++ false^k`（无尾部空白）经 `r` 次迭代后
+    变成 `false^(k+r) ++ false^(k+r)`，状态回到 0、头回到块首。
+    `r` iterations turn `false^k ++ true^r ++ false^k` into `false^(k+r) ++ false^(k+r)`. -/
+theorem double_loop_ctx (r k : Nat) (L : List Sym) :
+    doubleStep.run (doubleLoopSteps r k)
+      { state := (0 : Fin 4),
+        tape := { left := [none] ++ L,
+                  right := List.replicate k (some false) ++ List.replicate r (some true) ++
+                           List.replicate k (some false) } } =
+    { state := (0 : Fin 4),
+      tape := { left := [none] ++ L,
+                right := List.replicate (k + r) (some false) ++
+                         List.replicate (k + r) (some false) } } := by
+  induction r generalizing k with
+  | zero =>
+      simp [doubleLoopSteps, DTM.run]
+  | succ r ih =>
+      have hshape : List.replicate k (some false) ++ List.replicate (r + 1) (some true) ++
+          List.replicate k (some false) =
+          List.replicate k (some false) ++ some true ::
+            (List.replicate r (some true) ++ List.replicate k (some false) ++ ([] : List Sym)) := by
+        simp only [List.replicate_succ', List.singleton_append, List.append_assoc,
+          List.append_nil]
+        rw [cons_replicate_append]
+      rw [hshape]
+      rw [show doubleLoopSteps (r + 1) k = doubleIterSteps r k + doubleLoopSteps r (k + 1)
+        from rfl]
+      rw [DTM.run_add, double_iter_ctx r k [] (Or.inl rfl) L, ih (k + 1)]
+      simp [Nat.add_comm, Nat.add_left_comm]
 
 /-- 倍增主循环：块 `false^k ++ true^r ++ false^k`（无尾部空白）经 `r` 次迭代后
     变成 `false^(k+r) ++ false^(k+r)`，状态回到 0、头回到块首。 -/
