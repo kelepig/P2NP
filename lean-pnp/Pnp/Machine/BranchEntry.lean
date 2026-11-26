@@ -471,6 +471,102 @@ theorem acceptsWithin_of_dummy_branch_acc (q b B T i T' : Nat) (M : NTM q) (w : 
     hpadpost hpadpre hlen
     ((obsPhase_accept_iff q b ((M.stutter).haltNorm) _ _).mpr hHit)
 
+/-- **成本上限对轮数单调**（`Z`、`P`、`Bk` 固定）：`costCap` 随可用轮数 `T` 不减。
+    The cost cap is monotone in the number of rounds. -/
+theorem costCap_T_mono (P Z T T' Bk : Nat) (h : T' ≤ T) :
+    costCap P Z T' Bk ≤ costCap P Z T Bk := by
+  unfold costCap
+  have h6 : 6 * (P + T') ≤ 6 * (P + T) := Nat.mul_le_mul_left 6 (by omega)
+  have h2 : 2 * (Z + T' * (Bk + 3)) ≤ 2 * (Z + T * (Bk + 3)) :=
+    Nat.mul_le_mul_left 2 (Nat.add_le_add_left (Nat.mul_le_mul_right _ h) _)
+  omega
+
+/-- **哑元入口完备性的多项式预算版**：与 `exists_branch_dummy_hit_of_acceptsWithin` 同结论，
+    但预算换成多项式 `roundCostStay + T·costCap + 2(B+3)(T+1)`（对分支一致可枚举）。
+    Polynomial-budget version of the dummy-entry completeness: the uniform per-branch budget
+    is `roundCostStay + T·costCap + 2(B+3)(T+1)`, independent of the branch. -/
+theorem exists_branch_dummy_hit_of_acceptsWithin_poly {q : Nat} (M : NTM q) {B : Nat}
+    (hB : ∀ s a, (M.step s a).length ≤ B) (hBpos : 0 < B)
+    (w : List Bool) (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T)
+    (Z : Nat) (x : Reg q) (hx : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
+    (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (hxm : x.state = M.start)
+    (hpre : x.pre.length ≤ T + 1) (hZ : Z ≤ T + 1)
+    (hacc : M.AcceptsWithin w T) :
+    ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((simObs q b ((M.stutter).haltNorm)).run
+        (roundCostStay x Z (i % B) x.cur
+          + (T * costCap x.pre.length Z T (2 ^ b) + 2 * (B + 3) * (T + 1)))
+        ⟨(simObs q b ((M.stutter).haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))⟩).state
+        = obsAcc q b := by
+  -- 1. 接受 ⇒ 某分支通路成功且终态接受（零计数 `Z`）
+  obtain ⟨t, i, r, ht1, htT, hi, hpass, hracc⟩ :=
+    exists_pass_branchBlocks_of_acceptsWithin M hB hBpos w T b hbnd hT Z x hx hxw
+      hd1 hd2 hxacc hacc
+  have htpos : 0 < t := by omega
+  have hbks : ∀ k' ∈ branchBlocks B t i, k' + 2 < 2 ^ b :=
+    branchBlocks_hb B t i b hBpos hbnd
+  have hbklen : (branchBlocks B t i).length = t :=
+    branchBlocks_length B t i htpos
+  have hklt : seqHead B T i ≤ B := seqHead_lt B T i hBpos
+  have hc0 : 0 < 2 ^ b := by omega
+  have hcK : seqHead B T i < 2 ^ b := seqHead_lt_pow B t i b hBpos hbnd
+  have hmod : i % B ≤ B := Nat.le_of_lt (Nat.mod_lt i hBpos)
+  have hkS1 : i % B + 1 < 2 ^ b := by omega
+  have hK2 : i % B + 2 < 2 ^ b := by omega
+  -- 2. 零计数平移到哑元轮的输出 `Z + (i % B) + 3`
+  obtain ⟨r', hr', hreg, hc', hz', hst'⟩ :=
+    passRun_z_shift q b ((M.stutter).haltNorm).step (branchBlocks B t i) Z
+      (i % B + 3) (seqHead B T i) hcK x hbks r hpass
+  have hracc' : r'.reg.state = (M.stutter).haltNorm.accept := by
+    rw [hreg]; exact hracc
+  -- 3. 观察机在平移后的通路上于 `r'.steps` 内命中
+  have hne : branchBlocks B t i ≠ [] := by
+    intro h
+    rw [h, List.length_nil] at hbklen
+    omega
+  obtain ⟨n, hn, hhit⟩ :=
+    exists_obs_acc_of_passRun_accept q b (M.stutter) (branchBlocks B t i) hne
+      (Z + (i % B + 3)) (seqHead B T i) hcK x x.state.val x.state.isLt rfl
+      hx.1 hx.2 hbks r' hr' hracc'
+  -- 4. 命中搬到观察机自身起点（哑元前缀，首块值 `i % B`）
+  have hhit' : ((simObs q b ((M.stutter).haltNorm)).run n
+      (obsStart q b (M.stutter) x x.state.val (i % B + 1)
+        (Z + i % B + 3) x.state.isLt hkS1 (branchBlocks B t i))).state
+      = obsAcc q b := by
+    rw [show Z + (i % B + 3) = Z + i % B + 3 from by rw [Nat.add_assoc]] at hhit
+    exact hhit
+  obtain ⟨n', hn', hhit2⟩ :=
+    exists_obs_acc_of_dummy_prefix q b M x Z (i % B) hc0 hK2 hx.1 hxm hxacc hxre
+      (branchBlocks B t i) hkS1 n hhit'
+  -- 5. 步数上界：`r.steps ≤ t·costCap`（多项式），哑元轮与平移增量用常数吸收
+  have hsteps : r.steps ≤ (branchBlocks B t i).length
+      * costCap x.pre.length Z (branchBlocks B t i).length (2 ^ b) :=
+    passRun_steps_le q b ((M.stutter).haltNorm).step Z (seqHead B T i) hcK x
+      (branchBlocks B t i) hbks r hpass
+  have hcapT : costCap x.pre.length Z (branchBlocks B t i).length (2 ^ b)
+      ≤ costCap x.pre.length Z T (2 ^ b) :=
+    costCap_T_mono _ _ _ _ _ (by omega)
+  have hpoly : r.steps ≤ T * costCap x.pre.length Z T (2 ^ b) := by
+    rw [hbklen] at hsteps
+    exact Nat.le_trans hsteps (Nat.mul_le_mul htT hcapT)
+  have hmul : 2 * (i % B + 3) * t ≤ 2 * (B + 3) * (T + 1) :=
+    Nat.mul_le_mul (Nat.mul_le_mul_left 2 (by omega)) (by omega)
+  have hnfin : n ≤ T * costCap x.pre.length Z T (2 ^ b) + 2 * (B + 3) * (T + 1) := by
+    have := hn
+    rw [hst'] at this
+    rw [hbklen] at this
+    omega
+  -- 6. 延长到最终预算
+  exact ⟨t, i, ht1, htT, hi,
+    simObs_run_accept_at_budget q b ((M.stutter).haltNorm) n'
+      (roundCostStay x Z (i % B) x.cur
+        + (T * costCap x.pre.length Z T (2 ^ b) + 2 * (B + 3) * (T + 1)))
+      _ (by omega) hhit2⟩
+
 end DTM
 
 end Pnp
