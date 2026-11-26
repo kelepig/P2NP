@@ -734,6 +734,45 @@ theorem padStr_len_of_pos (m : Nat) (hm : 1 ≤ m) : (padStr (m - 1)).length = 3
   have := Nat.sub_add_cancel hm
   omega
 
+/-- **二次项 + 线性项被小指数吸收**：`(n+1)² + 10(n+1) + 10 ≤ 2^(2(n+1)+6)`。
+    用途：装配段成本（`expandCost_le` 的二次界）可整体塞进 `2^poly`。
+    Quadratic plus linear terms are absorbed by a small exponential. -/
+theorem quad_le_two_pow (T : Nat) :
+    (T + 1) * (T + 1) + 10 * (T + 1) + 10 ≤ 2 ^ (2 * (T + 1) + 6) := by
+  -- 记 `n = T+1`（`n ≥ 1`）
+  have hn : 1 ≤ T + 1 := by omega
+  -- `n² ≤ 2^(2n)`
+  have hsq : (T + 1) * (T + 1) ≤ 2 ^ (2 * (T + 1)) := by
+    have h1 : (T + 1) * (T + 1) ≤ 2 ^ (T + 1) * 2 ^ (T + 1) :=
+      Nat.mul_le_mul (self_le_two_pow (T + 1)) (self_le_two_pow (T + 1))
+    rw [← Nat.pow_add] at h1
+    rwa [show (T + 1) + (T + 1) = 2 * (T + 1) from by omega] at h1
+  -- `10n + 10 ≤ 2^(n+5)`
+  have hlin : 10 * (T + 1) + 10 ≤ 2 ^ (T + 1 + 5) := by
+    have hp : 2 ^ (T + 1 + 5) = 2 ^ 5 * 2 ^ (T + 1) := by
+      rw [show T + 1 + 5 = 5 + (T + 1) from by omega, Nat.pow_add]
+    have h32 : 32 * (T + 1) ≤ 32 * 2 ^ (T + 1) :=
+      Nat.mul_le_mul_left 32 (self_le_two_pow (T + 1))
+    have h5 : 2 ^ 5 = 32 := by decide
+    rw [hp, h5]
+    omega
+  -- 两段合并
+  have hsum : (T + 1) * (T + 1) + (10 * (T + 1) + 10)
+      ≤ 2 ^ (2 * (T + 1)) + 2 ^ (T + 1 + 5) :=
+    Nat.add_le_add hsq hlin
+  have hmid : (T + 1) + 5 ≤ 2 * (T + 1) + 5 := by omega
+  have hmax : max (2 * (T + 1)) (T + 1 + 5) ≤ 2 * (T + 1) + 5 := by
+    rcases Nat.le_total (2 * (T + 1)) (T + 1 + 5) with h | h
+    · rw [Nat.max_eq_right h]; omega
+    · rw [Nat.max_eq_left h]; omega
+  have hfin : 2 ^ (2 * (T + 1)) + 2 ^ (T + 1 + 5) ≤ 2 ^ (2 * (T + 1) + 6) := by
+    refine Nat.le_trans (add_pow_le (Nat.le_max_left _ _) (Nat.le_max_right _ _)) ?_
+    exact Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega)
+  have hassoc : (T + 1) * (T + 1) + 10 * (T + 1) + 10
+      = (T + 1) * (T + 1) + (10 * (T + 1) + 10) := by omega
+  rw [hassoc]
+  exact Nat.le_trans hsum hfin
+
 end DTM
 
 end Pnp
