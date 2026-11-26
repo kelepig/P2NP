@@ -260,9 +260,9 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
     (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
     {B : Nat} (hBpos : 0 < B)
     (hlB : ∀ m a', ((M.stutter).step m a').length ≤ B + 1)
-    (T b t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (htT : t ≤ T) (hbnd : B + 2 < 2 ^ b)
-    (Z m : Nat) (hm : 1 ≤ m) (hZT : Z ≤ T + 1) (R : List Sym)
-    (hd1 : T ≤ m)
+    (T b t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (_htT : t ≤ T) (hbnd : B + 2 < 2 ^ b)
+    (Z m : Nat) (hm : 1 ≤ m) (_hZT : Z ≤ T + 1) (R : List Sym)
+    (_hd1 : T ≤ m)
     (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
     (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
     (hpadpost : (branchBlocks B t i).length + 1
@@ -361,6 +361,80 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
         = roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
           + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b from by omega]
     exact hhit
+
+set_option maxHeartbeats 2000000 in
+/-- **逐分支判定机：单条等价（块数 `t`、视界 `T` 双参数）**：存在分支 `(t, i)`
+    （`1 ≤ t ≤ T`、`i < B^T`）使「装配 + 观察」整机在统一预算
+    「装配步数 + 1 + (单轮零计数成本 + 逐分支预算)」内停在接受态 ⇔ 原机在 `T` 步内接受。
+    两个方向分别由完备性（#259）与可靠性（块数 `t` 版）给出，中间用接受态冻结把
+    `i % B` 的单轮成本放宽到 `B`。
+    Machine-level per-branch equivalence: some branch makes the assembled machine accept
+    within the uniform per-branch budget iff `M` accepts within `T` steps. -/
+theorem branchMachine_dummy_iff {q : Nat} (M : NTM q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    {B : Nat} (hB : ∀ s x', (M.step s x').length ≤ B) (hBpos : 0 < B)
+    (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T) (Z m : Nat) (hm : 1 ≤ m)
+    (hZT : Z ≤ T + 1) (R : List Sym) (hd1 : T ≤ m)
+    (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
+    (hpost : ∀ t i, 1 ≤ t → t ≤ T → (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w m m).post.length)
+    (hpre : ∀ t i, 1 ≤ t → t ≤ T → (branchBlocks B t i).length + 1
+      ≤ (Reg.initReg M.start w m m).pre.length)
+    (hpad : roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+        + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1
+      ≤ 3 * (Reg.initReg M.start w m m).post.length + 1) :
+    (∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).run
+        (expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+              + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b))
+        ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+            (obsPhase q b ((M.stutter).haltNorm))).start,
+          Tape.mk (padStr (m - 1) ++ (none :: List.replicate Z (some false)
+              ++ digitArea (i % B :: branchBlocks B t i)))
+            ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+              ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
+      = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
+          (obsPhase q b ((M.stutter).haltNorm))).accept) ↔
+      M.AcceptsWithin w T := by
+  constructor
+  · -- 可靠性方向：整机接受 ⇒ 原机在 `T` 步内接受
+    rintro ⟨t, i, ht1, htT, _hiT, hacc⟩
+    have hmod : i % B < B := Nat.mod_lt i hBpos
+    refine branchMachine_dummy_sound M w a l' hw hl hBpos
+      (stutter_step_length_le M B hB) T b t i hT ht1 htT hbnd Z m hm hZT R hd1
+      (by omega) (by omega) hxacc hxre (hpost t i ht1 htT) (hpre t i ht1 htT) ?_ hpad hacc
+    rw [branchBlocks_length B t i (by omega)]
+    exact htT
+  · -- 完备性方向：原机接受 ⇒ 某分支在统一预算内接受（接受态冻结放宽预算）
+    intro hacc
+    obtain ⟨t, i, ht1, htT, hiT, haccm⟩ :=
+      branchMachine_dummy_complete M w a l' hw hl hB hBpos T b hbnd hT Z m hm hZT R hd1
+        hxacc hxre hpad hacc
+    refine ⟨t, i, ht1, htT, hiT, ?_⟩
+    have hmod : i % B < B := Nat.mod_lt i hBpos
+    have hrc : roundCostStay (Reg.initReg M.start w m m) Z (i % B)
+          (Reg.initReg M.start w m m).cur
+        ≤ roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur :=
+      roundCostStay_mono (Reg.initReg M.start w m m) Z Z (i % B) B
+        (Reg.initReg M.start w m m).cur (Nat.le_refl _) (Nat.le_of_lt hmod)
+    have hsplit : expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+              + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b)
+        = (expandCost (a :: l') + 1
+          + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)) + 1
+          + (roundCostStay (Reg.initReg M.start w m m) Z (i % B)
+                (Reg.initReg M.start w m m).cur
+              + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b))
+          + (roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
+              - roundCostStay (Reg.initReg M.start w m m) Z (i % B)
+                  (Reg.initReg M.start w m m).cur) := by
+      omega
+    rw [hsplit]
+    exact DTM.run_add_state_of_accept _ _ _ _ haccm
 
 
 end DTM

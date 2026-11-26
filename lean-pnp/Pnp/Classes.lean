@@ -572,6 +572,26 @@ theorem halted_of_accept_or_reject (M : DTM q) (c : Config q)
     (h : c.state = M.accept ∨ c.state = M.reject) : M.halted c = true := by
   rcases h with h | h <;> simp [halted, h]
 
+/-- **接受态冻结**：若跑 `n` 步后已停在接受态，再多跑 `m` 步格局不变。
+    Acceptance freezes: once the run of `n` steps ends in the accept state, running `m` more
+    steps changes nothing. -/
+theorem run_add_of_accept {q : Nat} (M : DTM q) (c : Config q) (n m : Nat)
+    (h : (M.run n c).state = M.accept) : M.run (n + m) c = M.run n c := by
+  rw [run_add]
+  exact run_of_halted M (M.run n c)
+    (halted_of_accept_or_reject M (M.run n c) (Or.inl h)) m
+
+/-- **接受态冻结（状态形式）**：跑 `n` 步后状态为接受态，则再跑 `m` 步状态仍是接受态。
+    Acceptance freezes (state form): if the run of `n` steps ends accepting, so does the run
+    of `n + m` steps. -/
+theorem run_add_state_of_accept {q : Nat} (M : DTM q) (c : Config q) (n m : Nat)
+    (h : (M.run n c).state = M.accept) : (M.run (n + m) c).state = M.accept := by
+  rw [run_add]
+  have hh : M.halted (M.run n c) = true :=
+    halted_of_accept_or_reject M (M.run n c) (Or.inl h)
+  rw [run_of_halted M (M.run n c) hh m]
+  exact h
+
 /-- 时间上限放宽后仍是判定器：T ≤ T' 逐点成立，则 DecidesIn T ⇒ DecidesIn T'。 -/
 theorem decidesIn_mono (M : DTM q) {T T' : Nat → Nat}
     (hle : ∀ n : Nat, T n ≤ T' n) {L : List Bool → Prop}
