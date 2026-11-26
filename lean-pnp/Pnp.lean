@@ -28,6 +28,7 @@ import Pnp.Machine.Phase
 import Pnp.Machine.Double
 import Pnp.Machine.Embed
 import Pnp.Machine.SeqComp
+import Pnp.Machine.GoComp
 import Pnp.Machine.Inc
 import Pnp.Machine.IncFlag
 import Pnp.Machine.ResetZeros
