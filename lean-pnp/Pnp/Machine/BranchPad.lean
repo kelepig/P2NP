@@ -77,6 +77,28 @@ theorem exists_branch_obsPhase_accept_of_acceptsWithin_initReg {q : Nat} (M : NT
   · rw [Reg.initReg_pre_length]
     exact Nat.le_refl _
 
+/-- **接受命中的停机时刻**：观察机在第 `n` 步停在接受哨兵 ⇒ 运行相位机在第 `n` 步已停机
+    （接受态）。E 逐分支读判据时用它给出冻结时刻。
+    A hit at step `n` means the run phase has halted (accept) by `n`. -/
+theorem obsPhase_halted_of_simObs_acc (q b : Nat) (M : NTM q) (n : Nat)
+    (c : Config (stateCountO q b))
+    (h : ((simObs q b M).run n c).state = obsAcc q b) :
+    (obsPhase q b M).halted
+      ((obsPhase q b M).run n ⟨embOb q b c.state, c.tape⟩) = true := by
+  have hacc : ((obsPhase q b M).run n ⟨embOb q b c.state, c.tape⟩).state
+      = (obsPhase q b M).accept := (obsPhase_accept_iff q b M n c).mpr h
+  exact halted_of_accept_or_reject (obsPhase q b M) _ (Or.inl hacc)
+
+/-- **失败命中的停机时刻**：观察机在第 `n` 步停在失败哨兵 ⇒ 运行相位机在第 `n+1` 步已停机
+    （逃逸态）。 The fail endpoint is likewise halting one step later. -/
+theorem obsPhase_halted_of_simObs_fail (q b : Nat) (M : NTM q) (n : Nat)
+    (c : Config (stateCountO q b))
+    (h : ((simObs q b M).run n c).state = obsFail q b) :
+    (obsPhase q b M).halted
+      ((obsPhase q b M).run (n + 1) ⟨embOb q b c.state, c.tape⟩) = true := by
+  have hesc := obsPhase_esc_of_simObs_fail q b M n c h
+  exact halted_of_accept_or_reject (obsPhase q b M) _ (Or.inr hesc)
+
 end DTM
 
 end Pnp
