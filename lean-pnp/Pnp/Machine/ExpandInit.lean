@@ -22,6 +22,14 @@ namespace Pnp
 
 namespace DTM
 
+/-- 输入单词的符号编码不含空白（供 `expand` 的非空白前提）。
+    The symbol encoding of an input word contains no blank (the expander's hypothesis). -/
+theorem map_some_ne_none (w : List Bool) : ∀ v ∈ w.map some, v ≠ none := by
+  intro v hv
+  simp only [List.mem_map] at hv
+  obtain ⟨b, -, rfl⟩ := hv
+  simp
+
 /-- **初始区域的编码形态**：`Reg.initReg st w (T+1) (T+1)` 的 `Reg.enc` 恰为
     首格两符号编码 + 左副垫 + `L`、头标记 + 输入余格编码 + 右副垫。
     The explicit tape form of `Reg.initReg`'s encoding. -/
