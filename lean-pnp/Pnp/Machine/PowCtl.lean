@@ -443,3 +443,415 @@ theorem nstep_state_five_stable {m n : Nat} (hmn : m ≤ n) (c : Config 6)
   rw [← Nat.add_sub_of_le hmn, DTM.run_add nstep m (n - m) c]
   exact nstep_run_state_five (n - m) (nstep.run m c) h5
 
+/-! ## U 控制器整机 `powCtl R`（#223）
+
+   `powCtl R` 把两块已机检的积木拼成一台机器：
+   - 状态 0..5：**逐字照抄 `nstep` 的转移表**（唯一例外：状态 5 = 相位结束，原地改接
+     到倍增段起点）；`nstep` 的耗尽态 2 同时是整机的 accept = reject。
+   - 状态 6..6+7R：**逐字照抄 `dblRounds R` 的转移表**（唯一例外：终止态 `6+7R` 改接回
+     状态 0，形成「消费一个 n 单元 → 跑 R 轮倍增 → 回来再消费」的循环）。
+   The U-controller `powCtl R`: states 0..5 copy `nstep` (state 5 hands off to the doubling
+   block), states 6..6+7R copy `dblRounds R` (its terminal rewired back to state 0).
+-/
+
+/-- 把倍增段（`Fin (7R+1)`）的状态抬到控制器右端：偏移 +6。
+    Lifting a doubling-block state into the controller (offset 6). -/
+def dblEmb (R : Nat) (s : Fin (7 * R + 1)) : Fin (7 * R + 8) :=
+  ⟨6 + s.val, by have := s.isLt; omega⟩
+
+/-- 把 `nstep` 的状态（`Fin 6`）放进制器左端：编号不变。
+    Placing an `nstep` state inside the controller (same index). -/
+def emb6 (R : Nat) (s : Fin 6) : Fin (7 * R + 8) :=
+  ⟨s.val, by have := s.isLt; omega⟩
+
+/-- **U 控制器 `powCtl R`**：n 单位消费相位（照抄 `nstep`）+ 固定 R 轮倍增相位
+    （照抄 `dblRounds R`），两条改接转移把它们首尾相接。停机 = `nstep` 耗尽（状态 2）。
+    The U-controller: `nstep` phase + `dblRounds R` phase with two rewiring transitions. -/
+def powCtl (R : Nat) : DTM (7 * R + 8) where
+  step := fun st a =>
+    if h6 : st.val < 6 then
+      if h5 : st.val = 5 then
+        -- 相位结束：原地改接进倍增段起点（纸带不动）
+        (dblEmb R (dblRounds R).start, a, Dir.stay)
+      else
+        -- 逐字照抄 `nstep` 的转移
+        let r := nstep.step ⟨st.val, h6⟩ a
+        (emb6 R r.1, r.2.1, r.2.2)
+    else
+      if hb : st.val - 6 < 7 * R + 1 then
+        if hs : (⟨st.val - 6, hb⟩ : Fin (7 * R + 1)) = (dblRounds R).accept then
+          -- 倍增段终止：回到相位 0，再消费下一个 n 单元
+          (⟨0, by omega⟩, a, Dir.stay)
+        else
+          let r := (dblRounds R).step ⟨st.val - 6, hb⟩ a
+          (dblEmb R r.1, r.2.1, r.2.2)
+      else (st, a, Dir.stay)
+  start := ⟨0, by omega⟩
+  accept := ⟨2, by omega⟩
+  reject := ⟨2, by omega⟩
+
+/-- 控制器起始态编号 0。 The start state index is 0. -/
+theorem powCtl_start_val (R : Nat) : (powCtl R).start.val = 0 := rfl
+
+/-- 控制器接受态编号 2（= `nstep` 耗尽态）。 The accept index is 2. -/
+theorem powCtl_accept_val (R : Nat) : (powCtl R).accept.val = 2 := rfl
+
+/-- 控制器拒绝态编号 2。 The reject index is 2. -/
+theorem powCtl_reject_val (R : Nat) : (powCtl R).reject.val = 2 := rfl
+
+/-- 控制器只在状态 2 停机（`nstep` 的耗尽态）。 Only state 2 halts. -/
+theorem powCtl_halted_ne (R : Nat) (s : Fin (7 * R + 8)) (h2 : s.val ≠ 2) (t : Tape) :
+    (powCtl R).halted ⟨s, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (powCtl R).accept.val = 2 from rfl] at hv
+    exact h2 hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show (powCtl R).reject.val = 2 from rfl] at hv
+    exact h2 hv
+
+/-- **左段的单步照抄**：只要 `nstep` 的状态不是 5，控制器在该状态上的转移与 `nstep` 完全一致。
+    The left block copies `nstep` on every state other than 5. -/
+theorem powCtl_step_copy (R : Nat) (s : Fin 6) (a : Sym) (h5 : s.val ≠ 5) :
+    (powCtl R).step (emb6 R s) a
+      = (emb6 R (nstep.step s a).1, (nstep.step s a).2) := by
+  have hlt : (emb6 R s).val < 6 := s.isLt
+  have hne : ¬ ((emb6 R s).val = 5) := h5
+  simp only [powCtl]
+  rw [dite_eq_left hlt, dite_eq_right hne]
+  rfl
+
+/-- **右段的单步照抄**：倍增段非终止态与 `dblRounds R` 完全一致。
+    The right block copies `dblRounds R` away from its terminal state. -/
+theorem powCtl_step_dbl (R : Nat) (s : Fin (7 * R + 1)) (a : Sym)
+    (hne : s ≠ (dblRounds R).accept) :
+    (powCtl R).step (dblEmb R s) a
+      = (dblEmb R ((dblRounds R).step s a).1, ((dblRounds R).step s a).2) := by
+  have hlt : ¬ ((dblEmb R s).val < 6) := by
+    show ¬ (6 + s.val < 6)
+    omega
+  have hb : (dblEmb R s).val - 6 < 7 * R + 1 := by
+    show 6 + s.val - 6 < 7 * R + 1
+    omega
+  have h1 : (⟨(dblEmb R s).val - 6, hb⟩ : Fin (7 * R + 1)) = s :=
+    Fin.ext (by show 6 + s.val - 6 = s.val; omega)
+  have hs : ¬ ((⟨(dblEmb R s).val - 6, hb⟩ : Fin (7 * R + 1)) = (dblRounds R).accept) := by
+    rw [h1]
+    exact hne
+  simp only [powCtl]
+  rw [dite_eq_right hlt, dite_eq_left hb, dite_eq_right hs, h1]
+
+/-- **左段整体搬运**：`nstep` 在前 `n` 步不停机且不经过状态 2/5，则控制器照搬整段运行。
+    Lifting a whole `nstep` run into the controller (states 2 and 5 excluded). -/
+theorem powCtl_run_consume_pre (R n : Nat) (c : Config 6) (q : Fin 6) (t : Tape)
+    (h : nstep.run n c = ⟨q, t⟩) (hq : q = (⟨1, by omega⟩ : Fin 6)) :
+    (powCtl R).run n ⟨emb6 R c.state, c.tape⟩ = ⟨emb6 R q, t⟩ := by
+  -- 整段不停机（终点状态 1 不是 `nstep` 的终止态 2）
+  have hA : ∀ m, m < n → nstep.halted (nstep.run m c) = false := by
+    intro m hm
+    refine halted_false_before nstep n c ?_ ?_ m hm
+    · rw [h]
+      intro hh
+      have hqq : q = nstep.accept := hh
+      have h2 : q.val = nstep.accept.val := congrArg Fin.val hqq
+      have h3 : nstep.accept.val = 2 := rfl
+      have hq1 : q.val = 1 := congrArg Fin.val hq
+      omega
+    · rw [h]
+      intro hh
+      have hqq : q = nstep.reject := hh
+      have h2 : q.val = nstep.reject.val := congrArg Fin.val hqq
+      have h3 : nstep.reject.val = 2 := rfl
+      have hq1 : q.val = 1 := congrArg Fin.val hq
+      omega
+  -- 前缀内状态既非 2（否则会停机）也非 5（否则终点也是 5）
+  have hok : ∀ m, m < n → (nstep.run m c).state.val ≠ 2 ∧ (nstep.run m c).state.val ≠ 5 := by
+    intro m hm
+    have hnh := hA m hm
+    constructor
+    · intro hv
+      have hacc : (nstep.run m c).state = nstep.accept := Fin.ext (by rw [hv]; rfl)
+      rw [DTM.halted, hacc] at hnh
+      simp at hnh
+    · intro hv
+      have h5 := nstep_state_five_stable (Nat.le_of_lt hm) c (Fin.ext hv)
+      rw [h] at h5
+      have hqq : q = (⟨5, by omega⟩ : Fin 6) := h5
+      have h2 : q.val = 5 := by
+        have hq5 := congrArg Fin.val hqq
+        simpa using hq5
+      have h1 : q.val = 1 := congrArg Fin.val hq
+      omega
+  have hmain := run_lift nstep (powCtl R) (emb6 R)
+    (fun s => s.val ≠ 2 ∧ s.val ≠ 5)
+    (fun s a hs => powCtl_step_copy R s a hs.2)
+    (fun s hs => by
+      constructor
+      · intro he
+        have hv := congrArg Fin.val he
+        rw [show (powCtl R).accept.val = 2 from rfl] at hv
+        exact hs.1 hv.symm
+      · intro he
+        have hv := congrArg Fin.val he
+        rw [show (powCtl R).reject.val = 2 from rfl] at hv
+        exact hs.1 hv.symm)
+    n c hA hok
+  rw [h] at hmain
+  exact hmain
+
+/-- **到站一步**：状态 1 读到值块首格 `some true`，转进状态 5（纸带不变）。
+    The arrival step: state 1 on the value block's first cell moves to state 5. -/
+theorem powCtl_arrive (R : Nat) (M Rt : List Sym) :
+    (powCtl R).run 1
+      ⟨emb6 R (⟨1, by omega⟩ : Fin 6), Tape.mk M (some true :: Rt)⟩
+      = ⟨emb6 R (⟨5, by omega⟩ : Fin 6), Tape.mk M (some true :: Rt)⟩ := by
+  show (powCtl R).run (0 + 1)
+    ⟨emb6 R (⟨1, by omega⟩ : Fin 6), Tape.mk M (some true :: Rt)⟩
+    = ⟨emb6 R (⟨5, by omega⟩ : Fin 6), Tape.mk M (some true :: Rt)⟩
+  rw [DTM.run_succ_of_not_halted (powCtl R) 0 _
+    (powCtl_halted_ne R _ (by show (1 : Nat) ≠ 2; decide) _)]
+  exact stepConfig_of_step (powCtl R)
+    ⟨emb6 R (⟨1, by omega⟩ : Fin 6), Tape.mk M (some true :: Rt)⟩
+    (emb6 R (⟨5, by omega⟩ : Fin 6)) (some true) Dir.stay (by
+      show (powCtl R).step (emb6 R (⟨1, by omega⟩ : Fin 6)) (some true)
+        = (emb6 R (⟨5, by omega⟩ : Fin 6), (some true, Dir.stay))
+      rw [powCtl_step_copy R (⟨1, by omega⟩ : Fin 6) (some true)
+        (by show (1 : Nat) ≠ 5; decide)]
+      rfl)
+
+/-- **交接一步**：状态 5 原地转入倍增段起点（纸带不动）。
+    The handoff step: state 5 rewires into the doubling block's start. -/
+theorem powCtl_handoff (R : Nat) (a : Sym) (M Rt : List Sym) :
+    (powCtl R).run 1
+      ⟨emb6 R (⟨5, by omega⟩ : Fin 6), Tape.mk M (a :: Rt)⟩
+      = ⟨dblEmb R (dblRounds R).start, Tape.mk M (a :: Rt)⟩ := by
+  show (powCtl R).run (0 + 1)
+    ⟨emb6 R (⟨5, by omega⟩ : Fin 6), Tape.mk M (a :: Rt)⟩
+    = ⟨dblEmb R (dblRounds R).start, Tape.mk M (a :: Rt)⟩
+  rw [DTM.run_succ_of_not_halted (powCtl R) 0 _
+    (powCtl_halted_ne R _ (by show (5 : Nat) ≠ 2; decide) _)]
+  exact stepConfig_of_step (powCtl R)
+    ⟨emb6 R (⟨5, by omega⟩ : Fin 6), Tape.mk M (a :: Rt)⟩
+    (dblEmb R (dblRounds R).start) a Dir.stay (by
+      show (powCtl R).step (emb6 R (⟨5, by omega⟩ : Fin 6)) a
+        = (dblEmb R (dblRounds R).start, (a, Dir.stay))
+      simp only [powCtl]
+      rw [dite_eq_left (by show (5 : Nat) < 6; omega),
+        dite_eq_left (by show (5 : Nat) = 5; omega)])
+
+/-- **消费一个 n 单位（尚无已消费格）**：前半段 5 步（`nstep` 前缀）+ 到站 1 步 + 交接 1 步。
+    Consuming one `n` unit when nothing has been consumed (7 steps total). -/
+theorem powCtl_consume_zero (R r m : Nat) (F Rt : List Sym) :
+    (powCtl R).run 7
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some true :: (List.replicate r (some true) ++ none :: F)))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨dblEmb R (dblRounds R).start,
+          Tape.mk (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩ := by
+  have hpre := powCtl_run_consume_pre R 5 _ _ _
+    (nstep_consume_pre_zero r m F Rt) rfl
+  show (powCtl R).run (5 + 1 + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some true :: (List.replicate r (some true) ++ none :: F)))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨dblEmb R (dblRounds R).start,
+          Tape.mk (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+  rw [DTM.run_add (powCtl R) (5 + 1) 1, DTM.run_add (powCtl R) 5 1, hpre,
+    powCtl_arrive R, powCtl_handoff R (some true)]
+
+/-- **消费一个 n 单位（已有已消费格）**：前半段 `2c + 7` 步 + 到站 1 步 + 交接 1 步。
+    Consuming one `n` unit below `c + 1` consumed cells (`2c + 9` steps total). -/
+theorem powCtl_consume_pos (R c r m : Nat) (F Rt : List Sym) :
+    (powCtl R).run (2 * c + 9)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate c (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F)))))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨dblEmb R (dblRounds R).start,
+          Tape.mk (none :: (List.replicate (c + 2) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩ := by
+  have hpre := powCtl_run_consume_pre R (2 * c + 7) _ _ _
+    (nstep_consume_pre_pos c r m F Rt) rfl
+  show (powCtl R).run ((2 * c + 7) + 1 + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate c (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F)))))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨dblEmb R (dblRounds R).start,
+          Tape.mk (none :: (List.replicate (c + 2) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+  rw [DTM.run_add (powCtl R) ((2 * c + 7) + 1) 1,
+    DTM.run_add (powCtl R) (2 * c + 7) 1, hpre, powCtl_arrive R, powCtl_handoff R (some true)]
+
+/-- 控制器左段的单步套路（状态照抄 `nstep`）。 The one-step idiom for the controller's left block. -/
+theorem estepPC (R : Nat) (st : Nat) (hst : st < 6) (a : Sym) (q' : Fin 6) (s : Sym)
+    (d : Dir) (h : nstep.step ⟨st, hst⟩ a = (q', s, d)) (M Rt : List Sym)
+    (h2 : st ≠ 2) (h5s : st ≠ 5) :
+    (powCtl R).run 1 ⟨emb6 R (⟨st, hst⟩ : Fin 6), Tape.mk M (a :: Rt)⟩
+      = ⟨emb6 R q', (Tape.mk M (a :: Rt)).write s |>.move d⟩ := by
+  show (powCtl R).run (0 + 1)
+    ⟨emb6 R (⟨st, hst⟩ : Fin 6), Tape.mk M (a :: Rt)⟩
+    = ⟨emb6 R q', (Tape.mk M (a :: Rt)).write s |>.move d⟩
+  rw [DTM.run_succ_of_not_halted (powCtl R) 0 _
+    (powCtl_halted_ne R _ (by show st ≠ 2; exact h2) _)]
+  exact stepConfig_of_step (powCtl R)
+    ⟨emb6 R (⟨st, hst⟩ : Fin 6), Tape.mk M (a :: Rt)⟩ (emb6 R q') s d (by
+      show (powCtl R).step (emb6 R (⟨st, hst⟩ : Fin 6)) a = (emb6 R q', s, d)
+      rw [powCtl_step_copy R ⟨st, hst⟩ a h5s, h])
+
+/-- **跨分隔空白（控制器版）**：与 `nstep_cross` 同一段路。 -/
+theorem powCtl_cross (R : Nat) (x a : Sym) (Xs Rt : List Sym) :
+    (powCtl R).run 2
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6), Tape.mk (none :: (x :: Xs)) (a :: Rt)⟩
+      = ⟨emb6 R (⟨4, by omega⟩ : Fin 6), Tape.mk Xs (x :: (none :: a :: Rt))⟩ := by
+  show (powCtl R).run (1 + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6), Tape.mk (none :: (x :: Xs)) (a :: Rt)⟩
+      = ⟨emb6 R (⟨4, by omega⟩ : Fin 6), Tape.mk Xs (x :: (none :: a :: Rt))⟩
+  rw [DTM.run_add (powCtl R) 1 1]
+  rw [estepPC R 0 (by omega) a (⟨3, by omega⟩ : Fin 6) a Dir.left (by rfl) _ _
+    (by omega) (by omega)]
+  etapeP
+  rw [estepPC R 3 (by omega) none (⟨4, by omega⟩ : Fin 6) none Dir.left (by rfl) _ _
+    (by omega) (by omega)]
+  etapeP
+
+/-- **左行跳过已消费格（耗尽版，控制器版）**：与 `nstep_walk_false_none` 同一段路。 -/
+theorem powCtl_walk_false_none (R k : Nat) (F W : List Sym) :
+    (powCtl R).run (k + 1)
+      ⟨emb6 R (⟨4, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate k (some false) ++ none :: F) (some false :: W)⟩
+      = ⟨emb6 R (⟨4, by omega⟩ : Fin 6),
+          Tape.mk F (none :: (List.replicate (k + 1) (some false) ++ W))⟩ := by
+  induction k generalizing W with
+  | zero =>
+      rw [estepPC R 4 (by omega) (some false) (⟨4, by omega⟩ : Fin 6) (some false) Dir.left
+        (by rfl) _ _ (by omega) (by omega)]
+      etapeP
+  | succ k ih =>
+      show (powCtl R).run ((k + 1) + 1)
+        ⟨emb6 R (⟨4, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate (k + 1) (some false) ++ none :: F) (some false :: W)⟩
+        = ⟨emb6 R (⟨4, by omega⟩ : Fin 6),
+            Tape.mk F (none :: (List.replicate (k + 1 + 1) (some false) ++ W))⟩
+      rw [DTM.run_succ_of_not_halted (powCtl R) (k + 1) _
+        (powCtl_halted_ne R _ (by show (4 : Nat) ≠ 2; decide) _)]
+      rw [stepConfig_of_step (powCtl R)
+        ⟨emb6 R (⟨4, by omega⟩ : Fin 6),
+          Tape.mk (List.replicate (k + 1) (some false) ++ none :: F) (some false :: W)⟩
+        (emb6 R (⟨4, by omega⟩ : Fin 6)) (some false) Dir.left (by
+          show (powCtl R).step (emb6 R (⟨4, by omega⟩ : Fin 6)) (some false)
+            = (emb6 R (⟨4, by omega⟩ : Fin 6), (some false, Dir.left))
+          rw [powCtl_step_copy R (⟨4, by omega⟩ : Fin 6) (some false)
+            (by show (4 : Nat) ≠ 5; decide)]
+          rfl)]
+      etapeP
+      rw [ih (some false :: W)]
+      rw [rep_cons_shift (k + 1) (some false) W]
+      etapeP
+
+/-- **耗尽（尚未消费任何格，控制器版）**：n 块为空，3 步停机（状态 2）。
+    Exhausted with nothing consumed: halts in three steps at state 2. -/
+theorem powCtl_exhaust_zero (R m : Nat) (F Rt : List Sym) :
+    (powCtl R).run 3
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (none :: F))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (none :: (some true :: (List.replicate m (some true) ++ (none :: Rt)))))⟩ := by
+  rw [show (3 : Nat) = 2 + 1 from rfl]
+  rw [DTM.run_add (powCtl R) 2 1]
+  rw [powCtl_cross R none (some true) F (List.replicate m (some true) ++ (none :: Rt))]
+  rw [estepPC R 4 (by omega) none (⟨2, by omega⟩ : Fin 6) none Dir.stay (by rfl) _ _
+    (by omega) (by omega)]
+  etapeP
+  rfl
+
+/-- **耗尽（已有已消费格，控制器版）**：n 块已空，`c + 4` 步停机（状态 2）。
+    Exhausted below `c + 1` consumed cells: halts in `c + 4` steps at state 2. -/
+theorem powCtl_exhaust_pos (R c m : Nat) (F Rt : List Sym) :
+    (powCtl R).run (c + 4)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate c (some false) ++ none :: F)))
+          (some true :: (List.replicate m (some true) ++ (none :: Rt)))⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (List.replicate (c + 1) (some false)
+              ++ (none :: (some true :: (List.replicate m (some true) ++ (none :: Rt))))))⟩ := by
+  rw [show c + 4 = 2 + (c + 1 + 1) from by omega]
+  rw [DTM.run_add (powCtl R) 2 (c + 1 + 1)]
+  rw [powCtl_cross R (some false) (some true)
+    (List.replicate c (some false) ++ none :: F)
+    (List.replicate m (some true) ++ (none :: Rt))]
+  rw [DTM.run_add (powCtl R) (c + 1) 1]
+  rw [powCtl_walk_false_none R c F
+    (none :: (some true :: (List.replicate m (some true) ++ (none :: Rt))))]
+  rw [estepPC R 4 (by omega) none (⟨2, by omega⟩ : Fin 6) none Dir.stay (by rfl) _ _
+    (by omega) (by omega)]
+  etapeP
+  rfl
+
+/-- **倍增段整体搬运**：控制器状态 `6 + ·` 上照抄 `dblRounds R`，整段 `R` 轮倍增原样搬进来。
+    Lifting the whole `dblRounds R` run into the controller's right block. -/
+theorem powCtl_run_dbl (R m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    (powCtl R).run (dblRoundsSteps R m)
+      ⟨dblEmb R (dblRounds R).start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩
+      = ⟨dblEmb R (dblRounds R).accept, Tape.mk ([none] ++ L) (unary (m * 2 ^ R) ++ [none])⟩ := by
+  have hmain := run_embed (dblRounds R) (powCtl R) (dblEmb R)
+    (fun s a hna _ => powCtl_step_dbl R s a hna)
+    (fun s _ _ => by
+      constructor
+      · intro he
+        have hv := congrArg Fin.val he
+        rw [show (powCtl R).accept.val = 2 from rfl] at hv
+        have h2 : (dblEmb R s).val = 6 + s.val := rfl
+        rw [h2] at hv
+        omega
+      · intro he
+        have hv := congrArg Fin.val he
+        rw [show (powCtl R).reject.val = 2 from rfl] at hv
+        have h2 : (dblEmb R s).val = 6 + s.val := rfl
+        rw [h2] at hv
+        omega)
+    (dblRoundsSteps R m)
+    ⟨(dblRounds R).start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩
+    (dblRounds_no_halt R m hm L)
+  rw [dblRounds_run R m hm L] at hmain
+  exact hmain
+
+/-- **倍增段终止后回到相位 0**：一步，纸带不动。 Back to phase 0 after the doubling block. -/
+theorem powCtl_back (R : Nat) (a : Sym) (M Rt : List Sym) :
+    (powCtl R).run 1
+      ⟨dblEmb R (dblRounds R).accept, Tape.mk M (a :: Rt)⟩
+      = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)), Tape.mk M (a :: Rt)⟩ := by
+  show (powCtl R).run (0 + 1)
+    ⟨dblEmb R (dblRounds R).accept, Tape.mk M (a :: Rt)⟩
+    = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)), Tape.mk M (a :: Rt)⟩
+  rw [DTM.run_succ_of_not_halted (powCtl R) 0 _
+    (powCtl_halted_ne R _
+      (by show ¬ (6 + (dblRounds R).accept.val = 2); omega) _)]
+  exact stepConfig_of_step (powCtl R)
+    ⟨dblEmb R (dblRounds R).accept, Tape.mk M (a :: Rt)⟩
+    (⟨0, by omega⟩ : Fin (7 * R + 8)) a Dir.stay (by
+      show (powCtl R).step (dblEmb R (dblRounds R).accept) a
+        = ((⟨0, by omega⟩ : Fin (7 * R + 8)), (a, Dir.stay))
+      simp only [powCtl]
+      rw [dite_eq_right (by show ¬ (6 + (dblRounds R).accept.val < 6); omega),
+        dite_eq_left (by show 6 + (dblRounds R).accept.val - 6 < 7 * R + 1; omega),
+        dite_eq_left (by
+          show (⟨6 + (dblRounds R).accept.val - 6,
+              (by show 6 + (dblRounds R).accept.val - 6 < 7 * R + 1; omega)⟩
+            : Fin (7 * R + 1)) = (dblRounds R).accept
+          exact Fin.ext (by show 6 + (dblRounds R).accept.val - 6
+            = (dblRounds R).accept.val; omega))])
+
+end DTM
+
+end Pnp
