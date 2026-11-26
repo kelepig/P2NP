@@ -15,6 +15,8 @@
 import Pnp.Machine.BranchPhase
 import Pnp.Machine.RightPad
 
+set_option maxHeartbeats 800000
+
 namespace Pnp
 
 namespace DTM
@@ -128,6 +130,49 @@ theorem obsPhase_verdict_of_hit_append (q b : Nat) (M : NTM q) (n K : Nat) (hn :
         = (obsPhase q b M).accept :=
   obsPhase_verdict_of_hit_padRight q b M n K hn c _ (Tape.padRight_of_append c.tape copy)
     hr hhit
+
+/-- **失败命中 + 右尾 ⇒ 判定搬运**：观察机在第 `n` 步停在失败哨兵 ⇒ 运行相位机第 `n+1` 步
+    已停机（逃逸态，#238）；右侧非空覆盖到 `n+1` ⇒ 任意预算 `K ≥ n+1` 下实际纸带（远端右尾）
+    与理想纸带的接受判定相同。这是 #239 接受侧的拒绝镜像。
+    Fail-hit mirror: escaping at step `n+1` makes a far-right tail irrelevant from then on. -/
+theorem obsPhase_verdict_of_fail_padRight (q b : Nat) (M : NTM q) (n K : Nat)
+    (hn : n + 1 ≤ K) (c : Config (stateCountO q b)) (t : Tape)
+    (hP : Tape.PadRight c.tape t) (hr : n + 2 ≤ c.tape.right.length)
+    (hfail : ((simObs q b M).run n c).state = obsFail q b) :
+    ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state
+        = (obsPhase q b M).accept ↔
+      ((obsPhase q b M).run K ⟨embOb q b c.state, t⟩).state
+        = (obsPhase q b M).accept := by
+  have hhalt := obsPhase_halted_of_simObs_fail q b M n c hfail
+  refine run_accept_eq_of_halted_at (obsPhase q b M) (n + 1) K hn _ _ ?_ hhalt
+  exact run_state_eq_of_padRight (obsPhase q b M) (n + 1) _ _ rfl hP
+    (right_safe_of_len (obsPhase q b M) (n + 1) _ (by omega))
+
+/-- 上面引理的「在右端追加副本」形态。 The append form of the fail-side transfer. -/
+theorem obsPhase_verdict_of_fail_append (q b : Nat) (M : NTM q) (n K : Nat)
+    (hn : n + 1 ≤ K) (c : Config (stateCountO q b)) (copy : List Sym)
+    (hr : n + 2 ≤ c.tape.right.length)
+    (hfail : ((simObs q b M).run n c).state = obsFail q b) :
+    ((obsPhase q b M).run K ⟨embOb q b c.state, c.tape⟩).state
+        = (obsPhase q b M).accept ↔
+      ((obsPhase q b M).run K
+        ⟨embOb q b c.state, ⟨c.tape.left, c.tape.right ++ copy⟩⟩).state
+        = (obsPhase q b M).accept :=
+  obsPhase_verdict_of_fail_padRight q b M n K hn c _ (Tape.padRight_of_append c.tape copy)
+    hr hfail
+
+/-- **预算覆盖 ⇒ 判定相同（无条件版）**：区域右侧预留至少覆盖整个预算 `K`（`K ≤ |post|`）时，
+    远端右尾在任何时刻都不会被读写头触到，故运行相位机在预算 `K` 处的接受判定完全相同。
+    与 #239 的冻结时刻版互补：这条不需要知道命中时刻，但要求副垫覆盖整个预算。
+    If the right padding covers the whole budget, the verdict at that budget is identical, with no
+    freeze-time bookkeeping (padding is then exponential, which EXP still affords). -/
+theorem obsPhase_verdict_of_padRight_budget (q b : Nat) (M : NTM q) (K : Nat)
+    (c : Config (stateCountO q b + 1)) (t : Tape)
+    (hP : Tape.PadRight c.tape t) (h : K + 1 ≤ c.tape.right.length) :
+    ((obsPhase q b M).run K c).state = (obsPhase q b M).accept ↔
+      ((obsPhase q b M).run K ⟨c.state, t⟩).state = (obsPhase q b M).accept := by
+  rw [run_state_eq_of_padRight (obsPhase q b M) K c ⟨c.state, t⟩ rfl hP
+    (right_safe_of_len (obsPhase q b M) K c h)]
 
 /-- **逐分支实际判据（E 机直接接口）**：`M` 在 `T` 步内接受 ⇒ 存在分支 `(t,i)` 与命中时刻
     `n`（`n ≤ T'·costCap+6`），使运行相位机在统一预算 `K` 处**对理想纸带与带右端副本的
