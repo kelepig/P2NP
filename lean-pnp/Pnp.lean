@@ -113,6 +113,7 @@ import Pnp.Machine.LenRound
 import Pnp.Machine.UnaryAdd
 import Pnp.Machine.WalkLC
 import Pnp.Machine.WalkRC
+import Pnp.Machine.PowCtl
 import Pnp.Machine.MulCopy
 import Pnp.Machine.MulConsume
 import Pnp.Machine.MulRestore
