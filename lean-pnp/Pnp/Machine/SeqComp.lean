@@ -178,6 +178,77 @@ theorem seqComp_run (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q)
       rw [Tape.write_read _ hne, Tape.move]]
   rw [hInner, seqComp_embed_right A B nb ⟨B.start, t'⟩ hnhB, hB]
 
+/-- **右段「吸收停机」搬运**：组合机在右段起点（`natAdd` 形态）出发的 `m` 步与 B 自己的
+    `m` 步逐字一致——**不要求 B 全程不停机**：B 中途停机时双方同时冻结，等式仍成立。
+    The right segment follows `B` step by step even if `B` halts midway (both freeze).
+    This removes the `hnhB` premise from phase chaining. -/
+theorem seqComp_run_natAdd (A : DTM q) (B : DTM q') (m : Nat) (c : Config q') :
+    (seqComp A B).run m ⟨Fin.natAdd q c.state, c.tape⟩
+      = ⟨Fin.natAdd q (B.run m c).state, (B.run m c).tape⟩ := by
+  induction m generalizing c with
+  | zero => rfl
+  | succ m ih =>
+      rw [DTM.run]
+      by_cases hh : B.halted c = true
+      · -- B 已停机：双方原地冻结
+        have hx : c.state = B.accept ∨ c.state = B.reject := by
+          simpa [DTM.halted, Bool.or_eq_true] using hh
+        have hC : (seqComp A B).halted ⟨Fin.natAdd q c.state, c.tape⟩ = true := by
+          apply halted_of_accept_or_reject
+          rcases hx with h | h
+          · exact Or.inl (by rw [h])
+          · exact Or.inr (by rw [h])
+        rw [hC]
+        simp only [if_true]
+        rw [run_of_halted B c hh (m + 1)]
+      · -- B 未停机：组合机也未停机，两边各走一步
+        have hx : B.halted c = false := by
+          cases hv : B.halted c with
+          | false => rfl
+          | true => exact absurd hv hh
+        have h1 : c.state ≠ B.accept := by
+          intro h
+          have : B.halted c = true := halted_of_accept_or_reject B c (Or.inl h)
+          rw [this] at hx
+          exact Bool.noConfusion hx
+        have h2 : c.state ≠ B.reject := by
+          intro h
+          have : B.halted c = true := halted_of_accept_or_reject B c (Or.inr h)
+          rw [this] at hx
+          exact Bool.noConfusion hx
+        have hC : (seqComp A B).halted ⟨Fin.natAdd q c.state, c.tape⟩ = false := by
+          have ha := (seqComp_halt_natAdd A B c.state h1 h2).1
+          have hr := (seqComp_halt_natAdd A B c.state h1 h2).2
+          simp [DTM.halted, ha, hr]
+        rw [hC]
+        simp only [Bool.false_eq_true, if_false]
+        have hstep : (seqComp A B).stepConfig ⟨Fin.natAdd q c.state, c.tape⟩
+            = ⟨Fin.natAdd q (B.stepConfig c).state, (B.stepConfig c).tape⟩ := by
+          simp only [DTM.stepConfig, seqComp_step_natAdd A B c.state c.tape.read]
+        have hB : B.run (m + 1) c = B.run m (B.stepConfig c) := by
+          rw [DTM.run, hx]
+          simp
+        rw [hstep, ih (B.stepConfig c), hB]
+
+/-- **相位吸收**：A 恰好 `na` 步跑到接受态后交给 B，组合机再跑 `nb` 步。
+    与 `seqComp_run` 的区别：**不需要 B 前缀不停机**（B 停机即冻结，判定照样可读）。
+    Phase absorption: after A's exactly-`na`-step run, the composite follows B for `nb`
+    arbitrary steps, with no non-halting premise on B. -/
+theorem seqComp_run_absorb (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q) (t' : Tape)
+    (hA : A.run na c = ⟨A.accept, t'⟩) (hne : t'.right ≠ [])
+    (hnhA : ∀ k, k < na → A.halted (A.run k c) = false) :
+    (seqComp A B).run (na + 1 + nb) ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.natAdd q (B.run nb ⟨B.start, t'⟩).state, (B.run nb ⟨B.start, t'⟩).tape⟩ := by
+  have hInner : (seqComp A B).run (na + 1) ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.natAdd q B.start, t'⟩ := by
+    rw [DTM.run_add (seqComp A B) na 1, seqComp_embed_left A B na c hnhA, hA,
+      seqComp_switch A B ⟨A.accept, t'⟩ rfl]
+    rw [show ((t'.write t'.read).move Dir.stay) = t' from by
+      rw [Tape.write_read _ hne, Tape.move]]
+  rw [show na + 1 + nb = (na + 1) + nb from by omega,
+    DTM.run_add (seqComp A B) (na + 1) nb, hInner]
+  exact seqComp_run_natAdd A B nb ⟨B.start, t'⟩
+
 end DTM
 
 end Pnp
