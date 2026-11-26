@@ -1071,6 +1071,224 @@ theorem segInc_run_carry (B k : Nat) (hk : k + 2 = B) (a₀ : Sym) (ha₀ : a₀
   rw [List.cons_append]
   rw [segInc_erase_stop B a₀ ha₀ L (List.replicate (k + 1) none ++ none :: R)]
 
+/-! ### 段间走位：从已擦除段的左侧空白走到下一段的最左真格 -/
+
+/-- **走到下一段**：状态 0 左移跳过空白垫，遇真格转状态 1 继续左移跳过整段真格，
+    最后右移一格停在下一段最左真格上（接受态 2）；若先碰到标志格 `some false`，
+    则进拒绝态 3（计数器溢出到顶）。
+    Walk to the next segment: skip blank pads and the next true run, then step right onto the
+    run's leftmost cell (accept 2); a `some false` marker halts in the reject state 3. -/
+def nextSeg : DTM 4 where
+  step := fun s a =>
+    if s.val = 0 then
+      match a with
+      | none => ((0 : Fin 4), a, Dir.left)
+      | some true => ((1 : Fin 4), a, Dir.left)
+      | some false => ((3 : Fin 4), a, Dir.stay)
+    else if s.val = 1 then
+      match a with
+      | some true => ((1 : Fin 4), a, Dir.left)
+      | _ => ((2 : Fin 4), a, Dir.right)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 2
+  reject := 3
+
+/-- 工作状态（0/1）不停机。 Working states never halt. -/
+theorem nextSeg_halted_false (st : Nat) (hst : st < 4) (h2 : st ≠ 2) (h3 : st ≠ 3)
+    (t : Tape) : nextSeg.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show nextSeg.accept.val = 2 from rfl] at hv
+    exact h2 hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show nextSeg.reject.val = 3 from rfl] at hv
+    exact h3 hv
+
+/-- 状态 0 读到空白：左移一格。 Blank in state 0: move left. -/
+theorem nextSeg_step_blank (x : Sym) (L R : List Sym) :
+    nextSeg.stepConfig ⟨(0 : Fin 4), Tape.mk (x :: L) (none :: R)⟩ =
+      ⟨(0 : Fin 4), Tape.mk L (x :: none :: R)⟩ := by
+  simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rfl
+
+/-- 状态 0 读到真格：转状态 1 并左移。 True in state 0: go to state 1 and move left. -/
+theorem nextSeg_step_true0 (x : Sym) (L R : List Sym) :
+    nextSeg.stepConfig ⟨(0 : Fin 4), Tape.mk (x :: L) (some true :: R)⟩ =
+      ⟨(1 : Fin 4), Tape.mk L (x :: some true :: R)⟩ := by
+  simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rfl
+
+/-- 状态 0 读到标志格 `some false`：进拒绝态停机（溢出）。 Flag: halt in the reject state. -/
+theorem nextSeg_step_flag (L R : List Sym) :
+    nextSeg.stepConfig ⟨(0 : Fin 4), Tape.mk L (some false :: R)⟩ =
+      ⟨(3 : Fin 4), Tape.mk L (some false :: R)⟩ := by
+  simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rfl
+
+/-- 状态 1 读到真格：左移一格。 True in state 1: move left. -/
+theorem nextSeg_step_true1 (x : Sym) (L R : List Sym) :
+    nextSeg.stepConfig ⟨(1 : Fin 4), Tape.mk (x :: L) (some true :: R)⟩ =
+      ⟨(1 : Fin 4), Tape.mk L (x :: some true :: R)⟩ := by
+  simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+    Tape.moveRight, List.headD, List.tail]
+  rfl
+
+/-- 状态 1 读到非真格：右移一格并接受（落到该段最左真格上）。 Non-true in state 1: step
+    right onto the run's leftmost cell and accept. -/
+theorem nextSeg_stop (L R : List Sym) (a : Sym) (ha : a ≠ some true) :
+    nextSeg.stepConfig ⟨(1 : Fin 4), Tape.mk L (a :: R)⟩ =
+      ⟨(2 : Fin 4), Tape.mk (a :: L) R⟩ := by
+  cases a with
+  | none =>
+      simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
+        Tape.moveRight, List.headD, List.tail]
+      rfl
+  | some b =>
+      cases b with
+      | false =>
+          simp only [DTM.stepConfig, nextSeg, Tape.read, Tape.write, Tape.move,
+            Tape.moveLeft, Tape.moveRight, List.headD, List.tail]
+          rfl
+      | true => exact absurd rfl ha
+
+/-- 跳过 `p` 个空白垫（`p + 1` 步，含入口那一个空白）。 Skip `p` blank pads. -/
+theorem nextSeg_pads (p : Nat) :
+    ∀ (L R : List Sym) (a : Sym),
+      nextSeg.run (p + 1)
+        ⟨(0 : Fin 4), Tape.mk (List.replicate p none ++ a :: L) (none :: R)⟩ =
+      ⟨(0 : Fin 4), Tape.mk L (a :: List.replicate p none ++ none :: R)⟩ := by
+  induction p with
+  | zero =>
+      intro L R a
+      simp only [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp nextSeg (Config.mk (0 : Fin 4) (Tape.mk (a :: L) (none :: R)))
+        (nextSeg_halted_false 0 (by omega) (by omega) (by omega) _)]
+      rw [nextSeg_step_blank a L R]
+      rw [List.singleton_append]
+  | succ p ih =>
+      intro L R a
+      rw [show List.replicate (p + 1) none ++ a :: L
+          = none :: (List.replicate p none ++ a :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [show p + 1 + 1 = 1 + (p + 1) from by omega]
+      rw [DTM.run_add nextSeg 1 (p + 1)]
+      rw [run_one_stp nextSeg
+        (Config.mk (0 : Fin 4)
+          (Tape.mk (none :: (List.replicate p none ++ a :: L)) (none :: R)))
+        (nextSeg_halted_false 0 (by omega) (by omega) (by omega) _)]
+      rw [nextSeg_step_blank none (List.replicate p none ++ a :: L) R]
+      rw [ih L (none :: R) a]
+      rw [List.cons_append]
+      rw [replicate_succ_append p none (none :: R)]
+      rw [List.cons_append]
+
+/-- 状态 1 跳过 `e + 1` 个真格（含当前格），停在左侧非真格上。
+    State 1 walks left over `e + 1` true cells. -/
+theorem nextSeg_trues1 (e : Nat) :
+    ∀ (L R : List Sym) (a : Sym), a ≠ some true →
+      nextSeg.run (e + 1)
+        ⟨(1 : Fin 4), Tape.mk (List.replicate e (some true) ++ a :: L) (some true :: R)⟩ =
+      ⟨(1 : Fin 4), Tape.mk L (a :: List.replicate (e + 1) (some true) ++ R)⟩ := by
+  induction e with
+  | zero =>
+      intro L R a ha
+      simp only [List.replicate_zero, List.nil_append, Nat.zero_add]
+      rw [run_one_stp nextSeg (Config.mk (1 : Fin 4) (Tape.mk (a :: L) (some true :: R)))
+        (nextSeg_halted_false 1 (by omega) (by omega) (by omega) _)]
+      rw [nextSeg_step_true1 a L R]
+      rw [List.replicate_one]
+      rw [List.cons_append, List.singleton_append]
+  | succ e ih =>
+      intro L R a ha
+      rw [show List.replicate (e + 1) (some true) ++ a :: L
+          = some true :: (List.replicate e (some true) ++ a :: L) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [show e + 1 + 1 = 1 + (e + 1) from by omega]
+      rw [DTM.run_add nextSeg 1 (e + 1)]
+      rw [run_one_stp nextSeg
+        (Config.mk (1 : Fin 4)
+          (Tape.mk (some true :: (List.replicate e (some true) ++ a :: L))
+            (some true :: R)))
+        (nextSeg_halted_false 1 (by omega) (by omega) (by omega) _)]
+      rw [nextSeg_step_true1 (some true) (List.replicate e (some true) ++ a :: L) R]
+      rw [ih L (some true :: R) a ha]
+      rw [List.cons_append]
+      rw [show 1 + (e + 1) = (e + 1) + 1 from by omega]
+      rw [replicate_succ_append (e + 1) (some true) R]
+      rw [List.cons_append]
+
+/-- 状态 0 跳过 `k + 2` 个真格（含当前格与 `k + 1` 个左邻格）。
+    State 0 walks left over a run of `k + 2` true cells. -/
+theorem nextSeg_trues0 (k : Nat) :
+    ∀ (L R : List Sym) (a : Sym), a ≠ some true →
+      nextSeg.run (k + 2)
+        ⟨(0 : Fin 4),
+          Tape.mk (List.replicate (k + 1) (some true) ++ a :: L) (some true :: R)⟩ =
+      ⟨(1 : Fin 4), Tape.mk L (a :: List.replicate (k + 2) (some true) ++ R)⟩ := by
+  intro L R a ha
+  rw [show List.replicate (k + 1) (some true) ++ a :: L
+      = some true :: (List.replicate k (some true) ++ a :: L) from by
+    rw [List.replicate_succ, List.cons_append]]
+  rw [show k + 2 = 1 + (k + 1) from by omega]
+  rw [DTM.run_add nextSeg 1 (k + 1)]
+  rw [run_one_stp nextSeg
+    (Config.mk (0 : Fin 4)
+      (Tape.mk (some true :: (List.replicate k (some true) ++ a :: L)) (some true :: R)))
+    (nextSeg_halted_false 0 (by omega) (by omega) (by omega) _)]
+  rw [nextSeg_step_true0 (some true) (List.replicate k (some true) ++ a :: L) R]
+  rw [nextSeg_trues1 k L (some true :: R) a ha]
+  rw [List.cons_append]
+  rw [show 1 + (k + 1) = (k + 1) + 1 from by omega]
+  rw [replicate_succ_append (k + 1) (some true) R]
+  rw [List.cons_append]
+
+/-- **走到下一段（整段）**：从已擦除段的左侧空白起，跳过 `p` 个空白垫、再跳过长度 `k + 2`
+    的真格串，`p + k + 4` 步后头停在下一段最左真格上并接受。
+    Full next-segment walk: `p + k + 4` steps land on the next run's leftmost cell. -/
+theorem nextSeg_run (p k : Nat) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
+    nextSeg.run (p + k + 4)
+        ⟨(0 : Fin 4),
+          Tape.mk (List.replicate p none ++ List.replicate (k + 2) (some true) ++ a :: L)
+            (none :: R)⟩ =
+      ⟨(2 : Fin 4),
+        Tape.mk (a :: L)
+          (List.replicate (k + 2) (some true) ++ List.replicate p none ++ none :: R)⟩ := by
+  rw [show List.replicate (k + 2) (some true)
+      = some true :: List.replicate (k + 1) (some true) from by
+    rw [List.replicate_succ]]
+  rw [show (List.replicate p none
+        ++ (some true :: List.replicate (k + 1) (some true))) ++ (a :: L)
+      = List.replicate p none
+        ++ some true :: (List.replicate (k + 1) (some true) ++ a :: L) from by
+    rw [List.append_assoc, List.cons_append]]
+  rw [show p + k + 4 = (p + 1) + ((k + 2) + 1) from by omega]
+  rw [DTM.run_add nextSeg (p + 1) ((k + 2) + 1)]
+  rw [nextSeg_pads p (List.replicate (k + 1) (some true) ++ a :: L) R (some true)]
+  rw [DTM.run_add nextSeg (k + 2) 1]
+  rw [show (some true :: List.replicate p none) ++ (none :: R)
+      = some true :: (List.replicate p none ++ none :: R) from by
+    rw [List.cons_append]]
+  rw [nextSeg_trues0 k L (List.replicate p none ++ none :: R) a ha]
+  rw [run_one_stp nextSeg
+    (Config.mk (1 : Fin 4)
+      (Tape.mk L (a :: List.replicate (k + 2) (some true)
+        ++ (List.replicate p none ++ none :: R))))
+    (nextSeg_halted_false 1 (by omega) (by omega) (by omega) _)]
+  rw [show (a :: List.replicate (k + 2) (some true)) ++ (List.replicate p none ++ none :: R)
+      = a :: (List.replicate (k + 2) (some true)
+        ++ (List.replicate p none ++ none :: R)) from by
+    rw [List.cons_append]]
+  rw [nextSeg_stop L (List.replicate (k + 2) (some true)
+    ++ (List.replicate p none ++ none :: R)) a ha]
+  simp only [List.replicate_succ, List.cons_append, List.append_assoc]
+
 end DTM
 
 end Pnp
