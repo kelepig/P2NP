@@ -1,0 +1,876 @@
+/-
+  文件：Pnp/Machine/MulRound.lean
+  File: Pnp/Machine/MulRound.lean
+
+  主题：**unary 乘法的一轮：复制遍 → 消费一个 B 格 → 恢复 A**。
+  Topic: one round of the unary multiplication machine: copy pass, consume one `B` cell,
+  restore `A`.
+
+  三个相位机（`mulCopy` / `mulConsume` / `mulRestore`）各自以接受态收尾。用 `seqComp` 串联
+  时必须提供「相位在收尾前不停机」——这正是各相位机逐段走位所保证的；本文件先机检这些
+  不停机事实，再给出整轮机器与整轮运行定理。
+  Each phase machine halts exactly at its terminal state. To chain them with `seqComp` we must
+  know that no phase halts before its end; this file proves those facts and then the round.
+
+  通用工具（与具体机器无关）：
+    - `no_halt_of_state_eq`：若运行途中的状态恒为某个非终止态，则这段不停机；
+    - `no_halt_add`：两段各自不停机 ⇒ 拼接后整段不停机。
+-/
+
+import Pnp.Machine.MulRestore
+import Pnp.Machine.SeqComp
+
+namespace Pnp
+
+namespace DTM
+
+/-! ### 通用不停机工具 -/
+
+/-- 若运行途中的状态恒为 `s`（`s` 不是接受/拒绝态），则这段运行不停机。
+    If every intermediate state equals a non-terminal state `s`, the run never halts. -/
+theorem no_halt_of_state_eq {q : Nat} (M : DTM q) (n : Nat) (c : Config q) (s : Fin q)
+    (ha : s ≠ M.accept) (hr : s ≠ M.reject)
+    (h : ∀ k, k < n → (M.run k c).state = s) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  intro k hk
+  rw [DTM.halted, h k hk, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr ha, beq_eq_false_iff_ne.mpr hr⟩
+
+/-- 两段各自不停机 ⇒ 拼接后整段不停机。 Concatenation of two non-halting runs. -/
+theorem no_halt_add {q : Nat} (M : DTM q) (n1 n2 : Nat) (c : Config q)
+    (h1 : ∀ k, k < n1 → M.halted (M.run k c) = false)
+    (h2 : ∀ k, k < n2 → M.halted (M.run k (M.run n1 c)) = false) :
+    ∀ k, k < n1 + n2 → M.halted (M.run k c) = false := by
+  intro k hk
+  by_cases hk1 : k < n1
+  · exact h1 k hk1
+  · have hk2 : k - n1 < n2 := by omega
+    rw [show k = n1 + (k - n1) from by omega, DTM.run_add M n1 (k - n1)]
+    exact h2 (k - n1) hk2
+
+/-! ### 三段走位「状态不变」引理 -/
+
+/-- 状态 5 向左走过 `m` 个标记源格（含最后落定的一步）时，状态恒为 5。
+    State 5 stays put while walking left over `m` marked source cells (final step included). -/
+theorem mulCopy_skip5_state : ∀ (m : Nat) (P R : List Sym) (j : Nat), j ≤ m + 1 →
+    (mulCopy.run j ⟨(⟨5, by omega⟩ : Fin 8),
+        Tape.mk (List.replicate m (some false) ++ none :: P) (some false :: R)⟩).state
+      = (⟨5, by omega⟩ : Fin 8)
+  | 0, P, R, j, hj => by
+      rcases j with _ | j'
+      · rfl
+      · have hj1 : j' = 0 := by omega
+        subst hj1
+        rw [estepMC 5 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+  | m + 1, P, R, j, hj => by
+      rcases j with _ | j'
+      · rfl
+      · rw [show j' + 1 = 1 + j' from by omega, DTM.run_add mulCopy 1 j']
+        rw [estepMC 5 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+        etape
+        exact mulCopy_skip5_state m P (some false :: R) j' (by omega)
+
+/-- 状态 4 向右走过 `m` 个 `some false` 副本格时，状态恒为 4。
+    State 4 stays put while walking right over `m` copy cells. -/
+theorem mulConsume_skipA_state : ∀ (m : Nat) (P R : List Sym) (j : Nat), j ≤ m →
+    (mulConsume.run j ⟨(⟨4, by omega⟩ : Fin 6),
+        Tape.mk P (List.replicate m (some false) ++ (none :: R))⟩).state
+      = (⟨4, by omega⟩ : Fin 6)
+  | 0, P, R, j, hj => by
+      have hj0 : j = 0 := by omega
+      subst hj0
+      rfl
+  | m + 1, P, R, j, hj => by
+      rcases j with _ | j'
+      · rfl
+      · rw [List.replicate_succ, List.cons_append]
+        rw [show j' + 1 = 1 + j' from by omega, DTM.run_add mulConsume 1 j']
+        rw [estepMCn 4 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+        etape
+        exact mulConsume_skipA_state m (some false :: P) R j' (by omega)
+
+/-- 状态 2 向右走过 `m'` 个 `some true` 恢复格的走位段（含最后落定的一步），状态恒为 2。
+    State 2 stays put while walking right over `m'` restored cells (final step included). -/
+theorem mulRestore_skipT_state : ∀ (m m' : Nat) (P Q : List Sym) (j : Nat), j ≤ m' + 1 →
+    (mulRestore.run j ⟨(⟨2, by omega⟩ : Fin 4),
+        Tape.mk (List.replicate m (some true) ++ (none :: P))
+          (some true :: (List.replicate m' (some true) ++ (none :: Q)))⟩).state
+      = (⟨2, by omega⟩ : Fin 4)
+  | m, 0, P, Q, j, hj => by
+      rcases j with _ | j'
+      · rfl
+      · have hj1 : j' = 0 := by omega
+        subst hj1
+        rw [estepMR 2 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+  | m, m' + 1, P, Q, j, hj => by
+      rcases j with _ | j'
+      · rfl
+      · rw [List.replicate_succ, List.cons_append]
+        rw [show j' + 1 = 1 + j' from by omega, DTM.run_add mulRestore 1 j']
+        rw [estepMR 2 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+        etape
+        exact mulRestore_skipT_state (m + 1) m' P Q j' (by omega)
+
+/-- 一步且起点不停机 ⇒ 这一步内不停机。 A one-step non-halting run. -/
+theorem no_halt_one {q : Nat} (M : DTM q) (c : Config q) (h : M.halted c = false) :
+    ∀ k, k < 1 → M.halted (M.run k c) = false := by
+  intro k hk
+  have hk0 : k = 0 := by omega
+  subst hk0
+  simpa [DTM.run] using h
+
+/-- 若一段运行 `n` 步后落在非终止态，则这段运行不停机。
+    A run ending in a non-terminal state never halts. -/
+theorem no_halt_of_run_end {q : Nat} (M : DTM q) (n : Nat) (c : Config q) (s : Fin q) (t : Tape)
+    (h : M.run n c = ⟨s, t⟩) (ha : s ≠ M.accept) (hr : s ≠ M.reject) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  intro k hk
+  refine halted_false_before M n c ?_ ?_ k hk
+  · rw [h]; exact ha
+  · rw [h]; exact hr
+
+/-! ### 三段收尾走位的不停机 -/
+
+/-- 复制遍收尾走位（状态 5 走到 `sepB`）在最后一步之前不停机。 -/
+theorem mulCopy_skip5_no_halt (m : Nat) (P R : List Sym) :
+    ∀ k, k < m + 2 →
+      mulCopy.halted (mulCopy.run k ⟨(⟨5, by omega⟩ : Fin 8),
+        Tape.mk (List.replicate m (some false) ++ none :: P) (some false :: R)⟩) = false :=
+  no_halt_of_state_eq mulCopy (m + 2) _ (⟨5, by omega⟩ : Fin 8)
+    (by decide) (by decide) (fun k hk => mulCopy_skip5_state m P R k (by omega))
+
+/-- 消费遍收尾走位（状态 4 穿过 A）在最后一步之前不停机。 -/
+theorem mulConsume_skipA_no_halt (m : Nat) (P R : List Sym) :
+    ∀ k, k < m + 1 →
+      mulConsume.halted (mulConsume.run k ⟨(⟨4, by omega⟩ : Fin 6),
+        Tape.mk P (List.replicate m (some false) ++ (none :: R))⟩) = false :=
+  no_halt_of_state_eq mulConsume (m + 1) _ (⟨4, by omega⟩ : Fin 6)
+    (by decide) (by decide) (fun k hk => mulConsume_skipA_state m P R k (by omega))
+
+/-- 恢复遍收尾走位（状态 2 回到 A 最右格）在最后一步之前不停机。 -/
+theorem mulRestore_skipT_no_halt (m m' : Nat) (P Q : List Sym) :
+    ∀ k, k < m' + 2 →
+      mulRestore.halted (mulRestore.run k ⟨(⟨2, by omega⟩ : Fin 4),
+        Tape.mk (List.replicate m (some true) ++ (none :: P))
+          (some true :: (List.replicate m' (some true) ++ (none :: Q)))⟩) = false :=
+  no_halt_of_state_eq mulRestore (m' + 2) _ (⟨2, by omega⟩ : Fin 4)
+    (by decide) (by decide) (fun k hk => mulRestore_skipT_state m m' P Q k (by omega))
+
+/-- `⟨s, _⟩` 与 `mulCopy` 接受态不同（`s ≠ 6`）。 -/
+theorem mulCopy_ne_accept {s : Nat} (hs : s < 8) (h : s ≠ 6) :
+    (⟨s, hs⟩ : Fin 8) ≠ mulCopy.accept := by
+  intro he
+  have hv : s = 6 := by
+    have := congrArg Fin.val he
+    rwa [show mulCopy.accept.val = 6 from rfl] at this
+  exact h hv
+
+/-- `⟨s, _⟩` 与 `mulCopy` 拒绝态不同（`s ≠ 6`）。 -/
+theorem mulCopy_ne_reject {s : Nat} (hs : s < 8) (h : s ≠ 6) :
+    (⟨s, hs⟩ : Fin 8) ≠ mulCopy.reject := by
+  intro he
+  have hv : s = 6 := by
+    have := congrArg Fin.val he
+    rwa [show mulCopy.reject.val = 6 from rfl] at this
+  exact h hv
+
+/-! ### 三个相位的全程不停机 -/
+
+/-- **消费遍全程不停机**：`a + 2u + 4` 步内从不接受（唯一终止在最后一步）。
+    The consume phase never halts before its final step. -/
+theorem mulConsume_no_halt (a u r : Nat) (h : 1 ≤ u) (L M : List Sym) :
+    ∀ k, k < a + 2 * u + 4 →
+      mulConsume.halted (mulConsume.run k ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (List.replicate u (some true) ++
+            (List.replicate r (some false) ++ (none :: (none :: L))))
+          (none :: (List.replicate a (some false) ++ (none :: M)))⟩) = false := by
+  rcases u with _ | u'
+  · omega
+  simp only [List.replicate_succ, List.cons_append, Nat.add_sub_cancel]
+  rw [show a + 2 * (u' + 1) + 4 = 1 + ((u' + 3) + ((u' + 1) + (a + 1))) from by omega]
+  refine no_halt_add mulConsume 1 ((u' + 3) + ((u' + 1) + (a + 1))) _ ?_ ?_
+  · exact no_halt_one mulConsume _ (mulConsume_halted_ne 0 (by omega) (by omega) _)
+  · rw [estepMCn 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+    etape
+    refine no_halt_add mulConsume (u' + 3) ((u' + 1) + (a + 1)) _ ?_ ?_
+    · intro k hk
+      refine halted_false_before mulConsume (u' + 3) _ ?_ ?_ k hk
+      · rw [mulConsume_toFlip u' r L (none :: (List.replicate a (some false) ++ (none :: M)))]
+        simp [mulConsume]
+      · rw [mulConsume_toFlip u' r L (none :: (List.replicate a (some false) ++ (none :: M)))]
+        simp [mulConsume]
+    · rw [mulConsume_toFlip u' r L (none :: (List.replicate a (some false) ++ (none :: M)))]
+      refine no_halt_add mulConsume (u' + 1) (a + 1) _ ?_ ?_
+      · intro k hk
+        refine halted_false_before mulConsume (u' + 1) _ ?_ ?_ k hk
+        · rw [mulConsume_skipR u'
+            (some false :: (List.replicate r (some false) ++ (none :: (none :: L))))
+            (List.replicate a (some false) ++ (none :: M))]
+          simp [mulConsume]
+        · rw [mulConsume_skipR u'
+            (some false :: (List.replicate r (some false) ++ (none :: (none :: L))))
+            (List.replicate a (some false) ++ (none :: M))]
+          simp [mulConsume]
+      · rw [mulConsume_skipR u'
+          (some false :: (List.replicate r (some false) ++ (none :: (none :: L))))
+          (List.replicate a (some false) ++ (none :: M))]
+        exact mulConsume_skipA_no_halt a (none :: (List.replicate u' (some true) ++
+          (some false :: (List.replicate r (some false) ++ (none :: (none :: L)))))) M
+
+/-- **恢复遍全程不停机**：`2a + 3` 步内从不接受。
+    The restore phase never halts before its final step. -/
+theorem mulRestore_no_halt (a : Nat) (h : 1 ≤ a) (P Q : List Sym) :
+    ∀ k, k < 2 * a + 3 →
+      mulRestore.halted (mulRestore.run k ⟨(⟨0, by omega⟩ : Fin 4),
+        Tape.mk (List.replicate a (some false) ++ (none :: P)) (none :: Q)⟩) = false := by
+  rcases a with _ | a'
+  · omega
+  simp only [List.replicate_succ, List.cons_append, Nat.add_sub_cancel]
+  rw [show 2 * (a' + 1) + 3 = (a' + 3) + (a' + 2) from by omega]
+  refine no_halt_add mulRestore (a' + 3) (a' + 2) _ ?_ ?_
+  · intro k hk
+    refine halted_false_before mulRestore (a' + 3) _ ?_ ?_ k hk
+    · rw [show a' + 3 = 1 + (a' + (1 + 1)) from by omega]
+      rw [DTM.run_add mulRestore 1 (a' + (1 + 1)),
+        estepMR 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [DTM.run_add mulRestore a' (1 + 1),
+        mulRestore_flip a' (none :: P) (none :: Q)]
+      rw [DTM.run_add mulRestore 1 1,
+        estepMR 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [estepMR 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      simp [mulRestore]
+    · rw [show a' + 3 = 1 + (a' + (1 + 1)) from by omega]
+      rw [DTM.run_add mulRestore 1 (a' + (1 + 1)),
+        estepMR 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [DTM.run_add mulRestore a' (1 + 1),
+        mulRestore_flip a' (none :: P) (none :: Q)]
+      rw [DTM.run_add mulRestore 1 1,
+        estepMR 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [estepMR 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      simp [mulRestore]
+  · rw [show a' + 3 = 1 + (a' + (1 + 1)) from by omega]
+    rw [DTM.run_add mulRestore 1 (a' + (1 + 1)),
+      estepMR 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+    etape
+    rw [DTM.run_add mulRestore a' (1 + 1),
+      mulRestore_flip a' (none :: P) (none :: Q)]
+    rw [DTM.run_add mulRestore 1 1,
+      estepMR 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+    etape
+    rw [estepMR 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+    etape
+    exact mulRestore_skipT_no_halt 0 a' P Q
+
+/-- 复制遍「唯一一轮」（源块只有一格、副本区为空）的前 4 步停在状态 5。
+    The first four steps of the single-cell copy unit end in state 5. -/
+theorem mulCopy_last0_cum (b r w : Nat) (hw : 1 ≤ w) (L R : List Sym) :
+    mulCopy.run 4
+      ⟨(⟨0, by omega⟩ : Fin 8), Tape.mk (mulB b r L) (mulR 0 0 w R)⟩
+      = ⟨(⟨5, by omega⟩ : Fin 8),
+          Tape.mk (mulB b r L)
+            (some false :: none :: some false ::
+              (List.replicate w (none : Sym) ++ R))⟩ := by
+  simp only [mulR, List.replicate_zero, List.nil_append]
+  rw [show (4 : Nat) = 1 + (1 + (1 + 1)) from by omega]
+  rw [DTM.run_add mulCopy 1 (1 + (1 + 1)),
+    estepMC 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  rw [DTM.run_add mulCopy 1 (1 + 1),
+    mulCopy_cross1 (some false :: mulB b r L) none (List.replicate w (none : Sym) ++ R)]
+  rw [DTM.run_add mulCopy 1 1,
+    mulCopy_write2_none (some false :: mulB b r L) (List.replicate w (none : Sym) ++ R)]
+  rw [mulCopy_cross4 (some false) (mulB b r L) (some false) (List.replicate w (none : Sym) ++ R)]
+
+/-- 源块只有一格时的复制遍不停机（6 步，唯一终止在最后一步）。 -/
+theorem mulCopy_last0_no_halt (b r w : Nat) (hw : 1 ≤ w) (L R : List Sym) :
+    ∀ k, k < 6 →
+      mulCopy.halted (mulCopy.run k ⟨(⟨0, by omega⟩ : Fin 8),
+        Tape.mk (mulB b r L) (mulR 0 0 w R)⟩) = false := by
+  rw [show (6 : Nat) = 4 + 2 from by omega]
+  refine no_halt_add mulCopy 4 2 _ ?_ ?_
+  · exact no_halt_of_run_end mulCopy 4 _ (⟨5, by omega⟩ : Fin 8) _
+      (mulCopy_last0_cum b r w hw L R) (mulCopy_ne_accept (by omega) (by omega))
+      (mulCopy_ne_reject (by omega) (by omega))
+  · rw [mulCopy_last0_cum b r w hw L R]
+    exact mulCopy_skip5_no_halt 0
+      (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++ (none :: (none :: L)))
+      (none :: (some false :: (List.replicate w (none : Sym) ++ R)))
+
+/-- 复制遍最后一轮的前 `2d + i + 4` 步停在状态 5（源区走完、副本区落定）。
+    The copy pass's last round reaches state 5 after `2d + i + 4` steps. -/
+theorem mulCopy_last_cum (a b r w d i : Nat) (hi : i + 1 = a) (hd : 1 ≤ d) (L R : List Sym) :
+    mulCopy.run (2 * d + i + 4)
+      ⟨(⟨0, by omega⟩ : Fin 8), Tape.mk (mulL a b r i L) (mulR d i w R)⟩
+      = ⟨(⟨5, by omega⟩ : Fin 8),
+          Tape.mk (List.replicate i (some false) ++ mulB b r L)
+            (some false :: none :: some false ::
+              (List.replicate (d - 1) (some false) ++
+                (some false :: (List.replicate w (none : Sym) ++ R))))⟩ := by
+  have hd1 : List.replicate d (some false) = some false :: List.replicate (d - 1) (some false) := by
+    cases d with
+    | zero => omega
+    | succ k => rw [List.replicate_succ, show k + 1 - 1 = k from by omega]
+  simp only [mulL, mulR]
+  rw [show 2 * d + i + 4 = 1 + ((i + 1) + ((d + 1) + ((d - 1) + 1 + 1))) from by omega]
+  rw [DTM.run_add mulCopy 1 ((i + 1) + ((d + 1) + ((d - 1) + 1 + 1))),
+    estepMC 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  rw [DTM.run_add mulCopy (i + 1) ((d + 1) + ((d - 1) + 1 + 1))]
+  rw [DTM.run_add mulCopy i 1]
+  rw [mulCopy_skip1 i (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))
+        (none :: (List.replicate d (some false) ++ (none :: (List.replicate w (none : Sym) ++ R))))]
+  rw [hd1, List.cons_append]
+  rw [mulCopy_cross1 (List.replicate i (some false) ++
+        (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))) (some false)
+        (List.replicate (d - 1) (some false) ++ (none :: (List.replicate w (none : Sym) ++ R)))]
+  rw [DTM.run_add mulCopy (d + 1) ((d - 1) + 1 + 1)]
+  rw [DTM.run_add mulCopy d 1]
+  rw [show some false :: (List.replicate (d - 1) (some false) ++
+        (none :: (List.replicate w (none : Sym) ++ R)))
+      = List.replicate d (some false) ++ (none :: (List.replicate w (none : Sym) ++ R)) from by
+    rw [hd1, List.cons_append]]
+  rw [mulCopy_skip2 d (none :: (List.replicate i (some false) ++
+        (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))))
+        (none :: (List.replicate w (none : Sym) ++ R))]
+  rw [show List.replicate d (some false) ++ (none :: (List.replicate i (some false) ++
+        (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))))
+      = some false :: (List.replicate (d - 1) (some false) ++ (none ::
+        (List.replicate i (some false) ++
+          (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))))) from by
+    rw [hd1, List.cons_append]]
+  rw [mulCopy_write2_some (List.replicate (d - 1) (some false) ++ (none ::
+        (List.replicate i (some false) ++
+          (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L)))))
+        (List.replicate w (none : Sym) ++ R)]
+  rw [DTM.run_add mulCopy ((d - 1) + 1) 1]
+  rw [DTM.run_add mulCopy (d - 1) 1]
+  rw [mulCopy_skip4 (d - 1) (none :: (List.replicate i (some false) ++
+        (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))))
+        (some false :: (List.replicate w (none : Sym) ++ R))]
+  rw [show (d - 1) + 1 = d from by omega]
+  rw [show List.replicate d (some false) ++ (some false :: (List.replicate w (none : Sym) ++ R))
+      = some false :: (List.replicate (d - 1) (some false) ++
+          (some false :: (List.replicate w (none : Sym) ++ R))) from by
+    rw [hd1, List.cons_append]]
+  rw [estepMC 4 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega : (4 : Nat) ≠ 6)]
+  etape
+  rw [show List.replicate i (some false) ++
+        (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))
+      = List.replicate (i + 1) (some false) ++
+        (List.replicate (a - 1 - i) (some true) ++ mulB b r L) from
+    replicate_succ_append i (some false) (List.replicate (a - 1 - i) (some true) ++ mulB b r L)]
+  rw [show List.replicate (a - 1 - i) (some true) ++ mulB b r L = mulB b r L from by
+    rw [show a - 1 - i = 0 from by omega]
+    simp]
+  rw [mulCopy_cross4_rep i (mulB b r L) (some false)
+        (List.replicate (d - 1) (some false) ++
+          (some false :: (List.replicate w (none : Sym) ++ R)))]
+
+/-- 复制遍最后一轮不停机（`2d + 2i + 6` 步，唯一终止在最后一步）。 -/
+theorem mulCopy_last_no_halt (a b r w d i : Nat) (hi : i + 1 = a) (hd : 1 ≤ d) (L R : List Sym) :
+    ∀ k, k < 2 * d + 2 * i + 6 →
+      mulCopy.halted (mulCopy.run k ⟨(⟨0, by omega⟩ : Fin 8),
+        Tape.mk (mulL a b r i L) (mulR d i w R)⟩) = false := by
+  rw [show 2 * d + 2 * i + 6 = (2 * d + i + 4) + (i + 2) from by omega]
+  refine no_halt_add mulCopy (2 * d + i + 4) (i + 2) _ ?_ ?_
+  · exact no_halt_of_run_end mulCopy (2 * d + i + 4) _ (⟨5, by omega⟩ : Fin 8) _
+      (mulCopy_last_cum a b r w d i hi hd L R) (mulCopy_ne_accept (by omega) (by omega))
+      (mulCopy_ne_reject (by omega) (by omega))
+  · rw [mulCopy_last_cum a b r w d i hi hd L R]
+    exact mulCopy_skip5_no_halt i
+      (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++ (none :: (none :: L)))
+      (none :: (some false :: (List.replicate (d - 1) (some false) ++
+        (some false :: (List.replicate w (none : Sym) ++ R)))))
+
+/-- **复制遍全程不停机**：整个复制遍内从不接受（唯一终止在最后一步）。
+    The copy pass never halts before its final step. -/
+theorem mulCopy_no_halt (a b r w d i : Nat) (hdi : i ≤ d) (hia : i + 1 ≤ a) (hwa : a - i ≤ w)
+    (L R : List Sym) :
+    ∀ k, k < mulLoopCost d i (a - i - 1) + (2 * (d + (a - i - 1)) + 2 * (a - 1) + 6) →
+      mulCopy.halted (mulCopy.run k ⟨(⟨0, by omega⟩ : Fin 8),
+        Tape.mk (mulL a b r i L) (mulR d i w R)⟩) = false := by
+  rcases Nat.eq_zero_or_pos d with hd0 | hdpos
+  · have hi : i = 0 := by omega
+    subst hi
+    subst hd0
+    rcases Nat.lt_or_ge a 2 with ha1 | ha2
+    · -- 源块只有一格：整个复制遍就是唯一一轮
+      have ha1' : a = 1 := by omega
+      subst ha1'
+      exact mulCopy_last0_no_halt b r w (by omega) L R
+    · -- 源块至少两格：`a - 1` 轮常规单元 + 最后一轮
+      rw [show a - 0 - 1 = a - 1 from by omega]
+      refine no_halt_add mulCopy (mulLoopCost 0 0 (a - 1))
+        (2 * (0 + (a - 1)) + 2 * (a - 1) + 6) _ ?_ ?_
+      · exact no_halt_of_run_end mulCopy (mulLoopCost 0 0 (a - 1)) _ (⟨0, by omega⟩ : Fin 8) _
+          (mulCopy_loop (a - 1) a b r w 0 0 L R (by omega) (by omega) (by omega))
+          (mulCopy_ne_accept (by omega) (by omega)) (mulCopy_ne_reject (by omega) (by omega))
+      · rw [mulCopy_loop (a - 1) a b r w 0 0 L R (by omega) (by omega) (by omega)]
+        rw [show 0 + (a - 1) = a - 1 from by omega]
+        exact mulCopy_last_no_halt a b r (w - (a - 1)) (a - 1) (a - 1)
+          (by omega) (by omega) L R
+  · -- 副本区非空：`a - i - 1` 轮常规单元 + 最后一轮
+    refine no_halt_add mulCopy (mulLoopCost d i (a - i - 1))
+      (2 * (d + (a - i - 1)) + 2 * (a - 1) + 6) _ ?_ ?_
+    · exact no_halt_of_run_end mulCopy (mulLoopCost d i (a - i - 1)) _ (⟨0, by omega⟩ : Fin 8) _
+        (mulCopy_loop (a - i - 1) a b r w d i L R (by omega) (by omega) (by omega))
+        (mulCopy_ne_accept (by omega) (by omega)) (mulCopy_ne_reject (by omega) (by omega))
+    · rw [mulCopy_loop (a - i - 1) a b r w d i L R (by omega) (by omega) (by omega)]
+      rw [show i + (a - i - 1) = a - 1 from by omega]
+      exact mulCopy_last_no_halt a b r (w - (a - i - 1)) (d + (a - i - 1)) (a - 1)
+        (by omega) (by omega) L R
+
+/-! ### 组合机的不停机桥 -/
+
+/-- 组合机在左侧状态上不停机。 -/
+theorem seqComp_halted_left {q q' : Nat} (A : DTM q) (B : DTM q') (s : Fin q) (t : Tape) :
+    (seqComp A B).halted ⟨Fin.castAdd q' s, t⟩ = false := by
+  obtain ⟨h1, h2⟩ := seqComp_halt_castAdd A B s
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr (fun he => h1 he.symm),
+    beq_eq_false_iff_ne.mpr (fun he => h2 he.symm)⟩
+
+/-- 组合机在 B 段的非终止状态上不停机。 -/
+theorem seqComp_halted_right {q q' : Nat} (A : DTM q) (B : DTM q') (s : Fin q')
+    (hacc : s ≠ B.accept) (hrej : s ≠ B.reject) (t : Tape) :
+    (seqComp A B).halted ⟨Fin.natAdd q s, t⟩ = false := by
+  obtain ⟨h1, h2⟩ := seqComp_halt_natAdd A B s hacc hrej
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr (fun he => h1 he.symm),
+    beq_eq_false_iff_ne.mpr (fun he => h2 he.symm)⟩
+
+/-- **组合机全程不停机**：A 跑到接受态、B 跑完全程，两段各自不停机 ⇒ 组合机不停机。
+    A sequential composition never halts when both phases never halt. -/
+theorem seqComp_no_halt {q q' : Nat} (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q)
+    (t' : Tape)
+    (hA : A.run na c = ⟨A.accept, t'⟩)
+    (hne : t'.right ≠ [])
+    (hnhA : ∀ k, k < na → A.halted (A.run k c) = false)
+    (hnhB : ∀ k, k < nb → B.halted (B.run k ⟨B.start, t'⟩) = false) :
+    ∀ k, k < na + 1 + nb →
+      (seqComp A B).halted ((seqComp A B).run k ⟨Fin.castAdd q' c.state, c.tape⟩) = false := by
+  have hmid : (seqComp A B).run na ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.castAdd q' A.accept, t'⟩ := by
+    rw [seqComp_embed_left A B na c hnhA, hA]
+  have hsw : (seqComp A B).run 1 (⟨Fin.castAdd q' A.accept, t'⟩ : Config (q + q'))
+      = ⟨Fin.natAdd q B.start, t'⟩ := by
+    rw [seqComp_switch A B ⟨A.accept, t'⟩ rfl,
+      show ((t'.write t'.read).move Dir.stay) = t' from by
+        rw [Tape.write_read _ hne, Tape.move]]
+  rw [show na + 1 + nb = (na + 1) + nb from by omega]
+  refine no_halt_add (seqComp A B) (na + 1) nb _
+    (no_halt_add (seqComp A B) na 1 _ ?_ ?_) ?_
+  · intro k hk
+    rw [seqComp_embed_left A B k c (fun m hm => hnhA m (by omega))]
+    exact seqComp_halted_left A B _ _
+  · rw [hmid]
+    exact no_halt_one (seqComp A B) _ (seqComp_halted_left A B A.accept t')
+  · rw [DTM.run_add (seqComp A B) na 1, hmid, hsw]
+    intro k hk
+    rw [seqComp_embed_right A B k ⟨B.start, t'⟩ (fun m hm => hnhB m (by omega))]
+    obtain ⟨hacc, hrej⟩ := by
+      simpa [DTM.halted] using hnhB k hk
+    exact seqComp_halted_right A B _ hacc hrej _
+
+@[simp] theorem mulCopy_start : mulCopy.start = (0 : Fin 8) := rfl
+@[simp] theorem mulCopy_accept : mulCopy.accept = (6 : Fin 8) := rfl
+@[simp] theorem mulCopy_reject : mulCopy.reject = (6 : Fin 8) := rfl
+@[simp] theorem mulConsume_start : mulConsume.start = (0 : Fin 6) := rfl
+@[simp] theorem mulConsume_accept : mulConsume.accept = (5 : Fin 6) := rfl
+@[simp] theorem mulConsume_reject : mulConsume.reject = (5 : Fin 6) := rfl
+@[simp] theorem mulRestore_start : mulRestore.start = (0 : Fin 4) := rfl
+@[simp] theorem mulRestore_accept : mulRestore.accept = (3 : Fin 4) := rfl
+@[simp] theorem mulRestore_reject : mulRestore.reject = (3 : Fin 4) := rfl
+
+/-- **一轮的前半**：复制遍 + 消费一个 `B` 格（内层组合机 `seqComp mulCopy mulConsume`）。
+    First half of a round: the copy pass and one consume step. -/
+theorem mulCopyConsume_run (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    (seqComp mulCopy mulConsume).run
+      (mulLoopCost d 0 (a - 1) + (2 * (d + (a - 1)) + 2 * (a - 1) + 6) + 1 +
+        (a + 2 * (b - r) + 4))
+      ⟨(seqComp mulCopy mulConsume).start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨(seqComp mulCopy mulConsume).accept,
+          Tape.mk (List.replicate a (some false) ++
+              (none :: (List.replicate (b - r - 1) (some true) ++
+                (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))))
+            (none :: (List.replicate (d + (a - 1)) (some false) ++
+              (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R))))⟩ := by
+  have hcopy := mulCopy_pass a b r w d 0 (by omega) (by omega) (by omega) L R
+  have hcons := mulConsume_run a (b - r) r hb L
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  have hconsNh := mulConsume_no_halt a (b - r) r hb L
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  exact seqComp_run mulCopy mulConsume _ _ _ _ _
+    (by simpa using hcopy) (by simp) (by simpa using hcons)
+    (mulCopy_no_halt a b r w d 0 (by omega) (by omega) (by omega) L R)
+    (by simpa using hconsNh)
+
+/-- 一轮的前半不停机。 The first half of a round never halts. -/
+theorem mulCopyConsume_no_halt (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    ∀ k, k < (mulLoopCost d 0 (a - 1) + (2 * (d + (a - 1)) + 2 * (a - 1) + 6) + 1 +
+        (a + 2 * (b - r) + 4)) →
+      (seqComp mulCopy mulConsume).halted
+        ((seqComp mulCopy mulConsume).run k
+          ⟨(seqComp mulCopy mulConsume).start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩) = false := by
+  have hcopy := mulCopy_pass a b r w d 0 (by omega) (by omega) (by omega) L R
+  have hcons := mulConsume_no_halt a (b - r) r hb L
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  exact seqComp_no_halt mulCopy mulConsume _ _ _ _
+    (by simpa using hcopy) (by simp)
+    (mulCopy_no_halt a b r w d 0 (by omega) (by omega) (by omega) L R)
+    (by simpa using hcons)
+
+/-! ### 一整轮 -/
+
+/-- 一轮的步数：复制遍 + 消费一个 `B` 格 + 恢复 `A`。
+    Step count of one round: copy pass, one consume step, restore. -/
+def mulRoundSteps (a b r w d : Nat) : Nat :=
+  (mulLoopCost d 0 (a - 1) + (2 * (d + (a - 1)) + 2 * (a - 1) + 6) + 1 +
+      (a + 2 * (b - r) + 4)) + 1 + (2 * a + 3)
+
+/-- 乘法的一轮机：`mulCopy` → `mulConsume` → `mulRestore`（状态数 `8 + 6 + 4`）。
+    One round of the unary multiplication machine. -/
+def mulRound : DTM (8 + 6 + 4) := seqComp (seqComp mulCopy mulConsume) mulRestore
+
+/-- `k` 轮链式乘法的总步数：第 `j` 轮从「已消费 `j`、副本区 `j·a`、空白 `W - j·a`」出发。
+    Total step count of `k` chained rounds; round `j` starts with `j` consumed cells and a
+    copy area of `j·a` cells. -/
+def mulRoundChainSteps : Nat → Nat → Nat → Nat → Nat
+  | 0, _, _, _ => 0
+  | k + 1, a, b, W =>
+      mulRoundChainSteps k a b W + (mulRoundSteps a b k (W - k * a) (k * a) + 1)
+
+/-- **一整轮**：复制遍 + 消费一个 `B` 格 + 恢复 `A`；一轮后 B 的已消费段 `r ↦ r + 1`、
+    副本区 `d ↦ d + a`、空白 `w ↦ w - a`，纸带形状与起点一致（可迭代）。
+    One round: after it the consumed count is `r + 1`, the copy area `d + a` and the
+    whitespace `w - a`, with the same tape shape as the round's start. -/
+theorem mulRound_run (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    mulRound.run (mulRoundSteps a b r w d)
+      ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulRound.accept, Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+  have hfirst := mulCopyConsume_run a b r w d ha hb hwa L R
+  have hrest := mulRestore_run a ha
+    (List.replicate (b - r - 1) (some true) ++
+      (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  have hstep := seqComp_run (seqComp mulCopy mulConsume) mulRestore _ _ _ _ _
+    (by simpa using hfirst) (by simp) (by simpa using hrest)
+    (mulCopyConsume_no_halt a b r w d ha hb hwa L R)
+    (mulRestore_no_halt a ha _ _)
+  refine hstep.trans ?_
+  simp only [List.replicate_zero, List.nil_append, mulL, mulB, mulR, mulRound,
+    mulRestore_accept, Config.mk.injEq, Tape.mk.injEq]
+  refine ⟨by simp [seqComp, mulRestore_accept], ?_, ?_⟩
+  · -- 左带：`b - r - 1` 与 `b - (r + 1)` 一致
+    simp only [Nat.sub_zero, show b - (r + 1) = b - r - 1 from by omega]
+    rw [List.append_assoc]
+  · -- 右带：`replicate` 的算术
+    rw [show d + (a - 1) = d + a - 1 from by omega]
+    rw [replicate_succ_append (d + a - 1) (some false)
+      (List.replicate (w - (a - 1)) (none : Sym) ++ R)]
+    rw [show d + a - 1 + 1 = d + a from by omega]
+    rw [show w - (a - 1) = w - a + 1 from by omega]
+    rw [show w - a + 1 = (w - a) + 1 from by omega, List.replicate_succ]
+    rw [List.cons_append]
+
+/-- **一轮全程不停机**：本轮的 `mulRoundSteps` 步内从不接受。
+    One round never halts before its final step. -/
+theorem mulRound_no_halt (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    ∀ k, k < mulRoundSteps a b r w d →
+      mulRound.halted
+        (mulRound.run k ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩) = false := by
+  have hfirst := mulCopyConsume_run a b r w d ha hb hwa L R
+  have hrest := mulRestore_run a ha
+    (List.replicate (b - r - 1) (some true) ++
+      (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  have hrestNh := mulRestore_no_halt a ha
+    (List.replicate (b - r - 1) (some true) ++
+      (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))
+    (List.replicate (d + (a - 1)) (some false) ++
+      (some false :: (List.replicate (w - (a - 1)) (none : Sym) ++ R)))
+  have hnh := seqComp_no_halt (seqComp mulCopy mulConsume) mulRestore _ _ _ _
+    (by simpa using hfirst) (by simp)
+    (mulCopyConsume_no_halt a b r w d ha hb hwa L R)
+    (by simpa using hrestNh)
+  simpa [mulRound, mulRoundSteps, seqComp] using hnh
+
+/-! ### 链式乘法轮机与统一相位 -/
+
+/-- 链式乘法轮机：`mulRound` 的接受态原地跳回起点（状态数 `8 + 6 + 4 + 1`，18 为不可达停机态）。
+    The chained multiplication machine: `mulRound`'s accept state jumps back to the start
+    (state count `8 + 6 + 4 + 1`, with 18 an unreachable terminal state). -/
+def mulChained : DTM (8 + 6 + 4 + 1) where
+  step := fun s a =>
+    if s.val = 17 then ((⟨0, by omega⟩ : Fin (8 + 6 + 4 + 1)), a, Dir.stay)
+    else if h : s.val < 18 then
+      let r := mulRound.step ⟨s.val, h⟩ a
+      (Fin.castLE (by omega) r.1, r.2)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 18
+  reject := 18
+
+/-- 链式机在 `mulRound` 接受态上的转移：原地回到起始态（写回读到的符号、不动）。
+    The chained transition at `mulRound`'s accept state: back to the start, tape untouched. -/
+theorem mulChained_step_accept (a : Sym) :
+    mulChained.step (Fin.castLE (by omega) mulRound.accept) a
+      = ((⟨0, by omega⟩ : Fin (8 + 6 + 4 + 1)), a, Dir.stay) := by
+  have hval : mulRound.accept.val = 17 := rfl
+  simp only [mulChained, Fin.val_castLE]
+  rw [if_pos hval]
+
+/-- 链式机的转移在 `mulRound` 的非接受状态上照抄 `mulRound`。
+    The chained machine copies `mulRound`'s transitions away from its accept state. -/
+theorem mulChained_step_castLE (s : Fin 18) (a : Sym) (hne : s ≠ mulRound.accept) :
+    mulChained.step (Fin.castLE (by omega) s) a
+      = (Fin.castLE (by omega) (mulRound.step s a).1, (mulRound.step s a).2) := by
+  have hv : s.val ≠ 17 := by
+    intro h
+    apply hne
+    have hacc : mulRound.accept = (⟨17, by omega⟩ : Fin 18) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  have hlt : s.val < 18 := s.isLt
+  simp only [mulChained, Fin.val_castLE]
+  rw [if_neg (by simpa using hv)]
+  rw [dif_pos hlt]
+
+/-- 链式机的接受/拒绝占位态不会与左侧状态重合（左侧状态的值 < 18）。
+    The placeholder terminal state never coincides with a `mulRound`-side state. -/
+theorem mulChained_halt_castLE (s : Fin 18) :
+    mulChained.accept ≠ Fin.castLE (by omega) s
+      ∧ mulChained.reject ≠ Fin.castLE (by omega) s := by
+  constructor
+  · intro h
+    have hv := congrArg Fin.val h
+    rw [Fin.val_castLE] at hv
+    have h2 : mulChained.accept.val = 18 := rfl
+    rw [h2] at hv
+    have h3 := s.isLt
+    omega
+  · intro h
+    have hv := congrArg Fin.val h
+    rw [Fin.val_castLE] at hv
+    have h2 : mulChained.reject.val = 18 := rfl
+    rw [h2] at hv
+    have h3 := s.isLt
+    omega
+
+/-- 链式机照搬 `mulRound` 的任意一段运行（`mulRound` 在这段内不停机）。
+    Chained runs mirror `mulRound` runs as long as `mulRound` does not halt. -/
+theorem mulChained_run_embed (n : Nat) (c : Config 18)
+    (hnh : ∀ k, k < n → mulRound.halted (mulRound.run k c) = false) :
+    mulChained.run n ⟨Fin.castLE (by omega) c.state, c.tape⟩ =
+      ⟨Fin.castLE (by omega) (mulRound.run n c).state, (mulRound.run n c).tape⟩ :=
+  run_embed mulRound mulChained (Fin.castLE (by omega))
+    (fun s a ha _ => mulChained_step_castLE s a ha)
+    (fun s _ _ => mulChained_halt_castLE s) n c hnh
+
+/-- **链式一轮**：跑完一轮乘法后**自动回到起始态**，共 `mulRoundSteps a b r w d + 1` 步。
+    One chained round: same tape effect as `mulRound`, but back in the start state. -/
+theorem mulChained_round (a b r w d : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b - r) (hwa : a ≤ w)
+    (L R : List Sym) :
+    mulChained.run (mulRoundSteps a b r w d + 1)
+      ⟨mulChained.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+      = ⟨mulChained.start, Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+  show mulChained.run (mulRoundSteps a b r w d + 1)
+      ⟨Fin.castLE (by omega) mulRound.start,
+        Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩ =
+    ⟨mulChained.start, Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩
+  have hemb := mulChained_run_embed (mulRoundSteps a b r w d)
+    ⟨mulRound.start, Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩
+    (mulRound_no_halt a b r w d ha hb hwa L R)
+  rw [mulRound_run a b r w d ha hb hwa L R] at hemb
+  have hemb' : mulChained.run (mulRoundSteps a b r w d)
+      ⟨Fin.castLE (by omega) mulRound.start,
+        Tape.mk (mulL a b r 0 L) (mulR d 0 w R)⟩ =
+      ⟨Fin.castLE (by omega) mulRound.accept,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+    simpa using hemb
+  have hnh2 : mulChained.halted
+      ⟨Fin.castLE (by omega) mulRound.accept,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ = false := by
+    rw [DTM.halted, Bool.or_eq_false_iff]
+    refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+    · intro h
+      have hv := congrArg Fin.val h
+      rw [Fin.val_castLE] at hv
+      have h2 : mulRound.accept.val = 17 := rfl
+      rw [h2] at hv
+      have h3 : mulChained.accept.val = 18 := rfl
+      rw [h3] at hv
+      exact absurd hv (by decide)
+    · intro h
+      have hv := congrArg Fin.val h
+      rw [Fin.val_castLE] at hv
+      have h2 : mulRound.accept.val = 17 := rfl
+      rw [h2] at hv
+      have h3 : mulChained.reject.val = 18 := rfl
+      rw [h3] at hv
+      exact absurd hv (by decide)
+  have hstep : mulChained.stepConfig
+      ⟨Fin.castLE (by omega) mulRound.accept,
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ =
+      ⟨(⟨0, by omega⟩ : Fin (8 + 6 + 4 + 1)),
+        Tape.mk (mulL a b (r + 1) 0 L) (mulR (d + a) 0 (w - a) R)⟩ := by
+    rw [DTM.stepConfig, mulChained_step_accept]
+    simp [Tape.write_read, Tape.move]
+  rw [DTM.run_add mulChained (mulRoundSteps a b r w d) 1, hemb']
+  rw [DTM.run_succ_of_not_halted mulChained 0 _ hnh2]
+  simpa [DTM.run, mulChained] using hstep
+
+/-- **多轮链式乘法**：`mulChained` 自动连跑 `k` 轮，已消费格 `k`、副本区 `k·a`、
+    空白 `W - k·a`，纸带形状全程不变、机器全程回到起点。
+    `k` chained rounds: `k` consumed cells, copy area `k·a`, whitespace `W - k·a`; the tape
+    shape is preserved and the machine returns to the start state each round. -/
+theorem mulChained_rounds (k a b W : Nat) (ha : 1 ≤ a) (hk : k ≤ b) (hW : k * a ≤ W)
+    (L R : List Sym) :
+    mulChained.run (mulRoundChainSteps k a b W)
+      ⟨mulChained.start, Tape.mk (mulL a b 0 0 L) (mulR 0 0 W R)⟩
+      = ⟨mulChained.start, Tape.mk (mulL a b k 0 L) (mulR (k * a) 0 (W - k * a) R)⟩ := by
+  induction k with
+  | zero =>
+      simp [mulRoundChainSteps, DTM.run]
+  | succ k ih =>
+      -- 把 `(k+1)·a` 写成 `k·a + a`，其余算术就都是 Presburger 了
+      have hstep : (k + 1) * a = k * a + a := Nat.succ_mul k a
+      have hkW : k * a ≤ W := by
+        have h' : k * a + a ≤ W := by rw [← hstep]; exact hW
+        exact Nat.le_trans (Nat.le_add_right (k * a) a) h'
+      have hwa : a ≤ W - k * a :=
+        Nat.le_sub_of_add_le (by rw [Nat.add_comm]; rw [← hstep]; exact hW)
+      rw [mulRoundChainSteps,
+        DTM.run_add mulChained (mulRoundChainSteps k a b W)
+          (mulRoundSteps a b k (W - k * a) (k * a) + 1),
+        ih (show k ≤ b from by omega) hkW,
+        mulChained_round a b k (W - k * a) (k * a) ha (by omega) hwa L R]
+      rw [show k * a + a = (k + 1) * a from by omega]
+      rw [show W - k * a - a = W - (k + 1) * a from by omega]
+
+/-- 统一相位机（3 状态，2 为停机态）：右行越过 A 的 `some true`、跨过 `sepA`，
+    再把副本区的 `some false` 逐格改回 `some true`，遇前沿空白接受。
+    The unify-phase machine: walk right over `A`'s trues, cross `sepA`, flip the copy area's
+    falses back to trues, and accept on the frontier blank. -/
+def mulFinish : DTM 3 where
+  step := fun s a =>
+    match s.val with
+    | 0 => (match a with
+       | some true => (⟨0, by omega⟩, some true, Dir.right)
+       | none => (⟨1, by omega⟩, none, Dir.right)
+       | some false => (⟨1, by omega⟩, some false, Dir.right))
+    | 1 => (match a with
+       | some false => (⟨1, by omega⟩, some true, Dir.right)
+       | none => (⟨2, by omega⟩, none, Dir.stay)
+       | some true => (⟨1, by omega⟩, some true, Dir.right))
+    | _ => (s, a, Dir.stay)
+  start := 0
+  accept := 2
+  reject := 2
+
+/-- 非 2 状态一律不停机。 States other than 2 never halt. -/
+theorem mulFinish_halted_ne (st : Nat) (hst : st < 3) (h : st ≠ 2) (t : Tape) :
+    mulFinish.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulFinish.accept.val = 2 from rfl] at hv
+    exact h hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show mulFinish.reject.val = 2 from rfl] at hv
+    exact h hv
+
+/-- `mulFinish` 的单步运行套路。 The one-step idiom for `mulFinish`. -/
+theorem estepMF (st : Nat) (hst : st < 3) (a : Sym) (q' : Fin 3) (s : Sym) (d : Dir)
+    (h : mulFinish.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 2) :
+    mulFinish.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
+      = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
+  rw [show (1 : Nat) = 0 + 1 from rfl]
+  rw [DTM.run_succ_of_not_halted _ 0 _ (mulFinish_halted_ne st hst hne _)]
+  exact stepConfig_of_step mulFinish ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩ q' s d h
+
+/-- 状态 1 把 `d` 个 `some false` 逐格改回 `some true`（头停在随后的空白上）。
+    State 1 flips `d` falses back to trues and stops on the following blank. -/
+theorem mulFinish_conv : ∀ (d : Nat) (P R : List Sym),
+    mulFinish.run d
+      ⟨(⟨1, by omega⟩ : Fin 3),
+        Tape.mk P (List.replicate d (some false) ++ (none :: R))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 3),
+          Tape.mk (List.replicate d (some true) ++ P) (none :: R)⟩
+  | 0, P, R => by
+      simp [DTM.run]
+  | d + 1, P, R => by
+      conv =>
+        lhs
+        rw [List.replicate_succ, List.cons_append]
+        rw [show d + 1 = 1 + d from by omega]
+      rw [DTM.run_add mulFinish 1 d]
+      rw [estepMF 1 (by omega) (some false) _ _ _ (by rfl) _ _ (by omega)]
+      etape
+      rw [mulFinish_conv d (some true :: P) R]
+      rw [replicate_succ_append d (some true) P]
+
+/-- **统一副本区**：`d + 3` 步——越过 A 最右格上的 `some true`、跨过 `sepA`，
+    把 `d` 个副本格 `some false` 改回 `some true`，遇前沿空白接受。
+    Unify the copy area in `d + 3` steps: over A's rightmost true, across `sepA`, flip the
+    `d` copy cells, and accept on the frontier blank. -/
+theorem mulFinish_run (d : Nat) (hd : 1 ≤ d) (A R : List Sym) :
+    mulFinish.run (d + 3)
+      ⟨(⟨0, by omega⟩ : Fin 3),
+        Tape.mk A (some true :: (none :: (List.replicate d (some false) ++ (none :: R))))⟩
+      = ⟨(⟨2, by omega⟩ : Fin 3),
+          Tape.mk (List.replicate d (some true) ++ (none :: (some true :: A)))
+            (none :: R)⟩ := by
+  rw [show d + 3 = 1 + (1 + (d + 1)) from by omega]
+  rw [DTM.run_add mulFinish 1 (1 + (d + 1))]
+  -- 状态 0：越过 A 最右格
+  rw [estepMF 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 状态 0：跨过 `sepA`
+  rw [DTM.run_add mulFinish 1 (d + 1)]
+  rw [estepMF 0 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 状态 1：逐格统一副本区
+  rw [DTM.run_add mulFinish d 1]
+  rw [mulFinish_conv d (none :: (some true :: A)) R]
+  -- 状态 1：遇前沿空白接受
+  rw [estepMF 1 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
+  etape
+
+/-- **乘法整机规格（纸带级）**：先跑 `b` 轮链式轮（副本区 `b·a` 格），再用统一相位把副本
+    区改回 `some true`，终态是 `replicate (b·a) true` 的 unary 块。
+    End-to-end tape-level spec: `b` chained rounds then the unify phase, ending with a unary
+    block of `b·a` trues. -/
+theorem mulChained_finish_run (a b W : Nat) (ha : 1 ≤ a) (hb : 1 ≤ b) (hW : b * a ≤ W)
+    (L R : List Sym) :
+    mulFinish.run (b * a + 3)
+      ⟨mulFinish.start,
+        (mulChained.run (mulRoundChainSteps b a b W)
+          ⟨mulChained.start, Tape.mk (mulL a b 0 0 L) (mulR 0 0 W R)⟩).tape⟩
+      = ⟨mulFinish.accept,
+          Tape.mk (List.replicate (b * a) (some true) ++
+              (none :: (some true :: mulL a b b 0 L)))
+            (none :: (List.replicate (W - b * a) (none : Sym) ++ R))⟩ := by
+  have hch := mulChained_rounds b a b W ha (by omega) hW L R
+  rw [hch]
+  have hrun := mulFinish_run (b * a)
+    (show 1 ≤ b * a from Nat.mul_pos (by omega) (by omega)) (mulL a b b 0 L)
+    (List.replicate (W - b * a) (none : Sym) ++ R)
+  simpa [mulFinish, mulR, List.replicate_zero, List.nil_append] using hrun

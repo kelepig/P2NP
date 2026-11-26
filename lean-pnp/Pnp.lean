@@ -113,6 +113,7 @@ import Pnp.Machine.WalkRC
 import Pnp.Machine.MulCopy
 import Pnp.Machine.MulConsume
 import Pnp.Machine.MulRestore
+import Pnp.Machine.MulRound
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
