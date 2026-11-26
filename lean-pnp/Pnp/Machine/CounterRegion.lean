@@ -1302,17 +1302,44 @@ theorem nextSeg_run (p k : Nat) (a : Sym) (ha : a ≠ some true) (L R : List Sym
 
 /-! ### 进位链：segInc 的清零相位之后续走位与逐段进位 -/
 
-/-- 走位堆叠的左上下文：`r` 个「空白垫 + 满段（长度 `B-1`）」。
-    Stacked left context of `r` full segments, each preceded by `p` blank pads. -/
-def segFullL (p B : Nat) : Nat → List Sym
+/-- 进位链左侧的 `r` 个满段：每层 `p + 1` 个空白垫 + `B - 1` 个真格。
+    `r` full layers on the left of the carry chain (`p+1` pads + `B-1` trues each). -/
+def chainL (p B : Nat) : Nat → List Sym
   | 0 => []
-  | r + 1 => List.replicate p none ++ List.replicate (B - 1) (some true) ++ segFullL p B r
+  | r + 1 => List.replicate (p + 1) none ++ List.replicate (B - 1) (some true) ++ chainL p B r
 
-/-- 每走过一段后纸带右边多出的空白记账：`r` 次进位累计 `p + B - 1` 个空白。
-    Accumulated right-side blanks after `r` carries. -/
+/-- 进位链走过 `r` 段后在右侧积累的空白：每轮前置 `p` 个垫格、`B-1` 个擦除格与 1 个尾格。
+    Blanks accumulated on the right after `r` carried segments. -/
 def chainJunk (p B : Nat) : Nat → List Sym → List Sym
   | 0, J => J
-  | r + 1, J => List.replicate (p + B - 1) none ++ chainJunk p B r J
+  | r + 1, J => List.replicate p none ++ List.replicate (B - 1) none ++ none :: chainJunk p B r J
+
+/-- 空白记账的前移一步：`r` 轮记账再前置一块 = `r + 1` 轮记账。
+    Prepending one block to the `r`-round ledger equals the `(r+1)`-round ledger. -/
+theorem chainJunk_shift (p B r : Nat) (J : List Sym) :
+    chainJunk p B r (List.replicate p none ++ List.replicate (B - 1) none ++ none :: J)
+      = chainJunk p B (r + 1) J := by
+  induction r with
+  | zero => rfl
+  | succ r ih =>
+      rw [chainJunk, ih]
+      rw [show chainJunk p B (r + 1 + 1) J
+          = List.replicate p none ++ List.replicate (B - 1) none
+            ++ none :: chainJunk p B (r + 1) J from rfl]
+
+/-- 左带 `chainL r ++ M` 的首格是空白（`M` 的首格为空白时）。 -/
+theorem chainL_head_none (p B r : Nat) (M : List Sym) (hM : M.head? = some none) :
+    (chainL p B r ++ M).head? = some none := by
+  induction r with
+  | zero => exact hM
+  | succ r ih =>
+      rw [show chainL p B (r + 1) ++ M
+          = none :: (List.replicate p none ++ List.replicate (B - 1) (some true)
+            ++ chainL p B r ++ M) from by
+        simp only [chainL, List.replicate_succ, List.cons_append, List.append_assoc]]
+      rfl
+
+/-! ### 进位链：segInc 的清零相位之后续走位与逐段进位 -/
 
 /-- 走位相位（`B+3`）读到空白：左移一格。 Walk phase on a blank: move left. -/
 theorem segInc_walk_blank (B : Nat) (x : Sym) (L R : List Sym) :
@@ -1321,9 +1348,8 @@ theorem segInc_walk_blank (B : Nat) (x : Sym) (L R : List Sym) :
       ⟨(⟨B + 3, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: none :: R)⟩ := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
-  split
-  · rfl
-  · next h => exact absurd h (by omega)
+  repeat' split
+  all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
 
 /-- 走位相位读到真格：进 `B+4` 并左移。 Walk phase on a true cell: enter `B+4`, move left. -/
 theorem segInc_walk_true0 (B : Nat) (x : Sym) (L R : List Sym) :
@@ -1332,9 +1358,8 @@ theorem segInc_walk_true0 (B : Nat) (x : Sym) (L R : List Sym) :
       ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: some true :: R)⟩ := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
-  split
-  · rfl
-  · next h => exact absurd h (by omega)
+  repeat' split
+  all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
 
 /-- 走位相位读到标志格 `some false`：进溢出拒绝态。 Walk phase on the flag: overflow. -/
 theorem segInc_walk_flag (B : Nat) (L R : List Sym) :
@@ -1343,9 +1368,8 @@ theorem segInc_walk_flag (B : Nat) (L R : List Sym) :
       ⟨(⟨B + 6, by omega⟩ : Fin (B + 7)), Tape.mk L (some false :: R)⟩ := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
-  split
-  · rfl
-  · next h => exact absurd h (by omega)
+  repeat' split
+  all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
 
 /-- 走位相位 `B+4` 读到真格：左移一格。 Walk phase `B+4` on a true cell: move left. -/
 theorem segInc_walk_true1 (B : Nat) (x : Sym) (L R : List Sym) :
@@ -1354,9 +1378,8 @@ theorem segInc_walk_true1 (B : Nat) (x : Sym) (L R : List Sym) :
       ⟨(⟨B + 4, by omega⟩ : Fin (B + 7)), Tape.mk L (x :: some true :: R)⟩ := by
   simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
     Tape.moveRight, List.headD, List.tail]
-  split
-  · rfl
-  · next h => exact absurd h (by omega)
+  repeat' split
+  all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
 
 /-- 走位相位 `B+4` 读到非真格：右移一格并**重启**（回到计数相位 0）。
     Walk phase `B+4` on a non-true cell: step right and restart at state 0. -/
@@ -1368,17 +1391,15 @@ theorem segInc_walk_stop (B : Nat) (L R : List Sym) (a : Sym) (ha : a ≠ some t
   | none =>
       simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move, Tape.moveLeft,
         Tape.moveRight, List.headD, List.tail]
-      split
-      · rfl
-      · next h => exact absurd h (by omega)
+      repeat' split
+      all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
   | some b =>
       cases b with
       | false =>
           simp only [DTM.stepConfig, segInc, Tape.read, Tape.write, Tape.move,
             Tape.moveLeft, Tape.moveRight, List.headD, List.tail]
-          split
-          · rfl
-          · next h => exact absurd h (by omega)
+          repeat' split
+          all_goals first | rfl | (exfalso; omega) | (exfalso; simp_all)
       | true => exact absurd rfl ha
 
 /-- 走位相位跳过 `p` 个空白垫（`p + 1` 步）。 Walk phase over `p` blank pads. -/
@@ -1516,6 +1537,129 @@ theorem segInc_walk_run (B p k : Nat) (a : Sym) (ha : a ≠ some true) (L R : Li
     ++ (List.replicate p none ++ none :: R)) a ha]
   simp only [List.replicate_succ, List.cons_append, List.append_assoc]
 
-end DTM
+/-- **进位链的一轮**：当前满段（`B - 1` 个真格）整段擦除后，向左跳过 `p` 个空白垫与
+    一段 `d` 个真格，重启在下一段左端（状态 0）；成本 `2B + p + d + 2`。
+    One carry round: erase the current full segment, walk left over `p` pads and a run of
+    `d` trues, and restart state 0 at the next segment's left end. -/
+theorem segInc_roundC (B p d : Nat) (hB : 3 ≤ B) (hp : 1 ≤ p) (hd : 2 ≤ d)
+    (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
+    (segInc B).run (2 * B + p + d + 2)
+        ⟨(0 : Fin (B + 7)),
+          Tape.mk (List.replicate (p + 1) none ++ List.replicate d (some true) ++ a :: L)
+            (List.replicate (B - 1) (some true) ++ none :: R)⟩ =
+      ⟨(0 : Fin (B + 7)),
+        Tape.mk (a :: L)
+          (List.replicate d (some true) ++ List.replicate (p + 1) none
+            ++ List.replicate (B - 1) none ++ none :: R)⟩ := by
+  -- 入口左带拆成一格 + 余段（配合进位段 `a₀ :: L` 的形态）
+  rw [show List.replicate (p + 1) none ++ List.replicate d (some true) ++ a :: L
+      = none :: (List.replicate p none ++ List.replicate d (some true) ++ a :: L) from by
+    simp only [List.replicate_succ, List.cons_append, List.append_assoc]]
+  -- 进位段：参数 `k₁ = B - 2`
+  rw [show List.replicate (B - 1) (some true) = List.replicate ((B - 2) + 1) (some true) from by
+    rw [show (B - 2) + 1 = B - 1 from by omega]]
+  rw [show 2 * B + p + d + 2 = (2 * (B - 2) + 4) + (p + (d - 2) + 4) from by omega]
+  rw [DTM.run_add (segInc B) (2 * (B - 2) + 4) (p + (d - 2) + 4)]
+  rw [segInc_run_carry B (B - 2) (by omega) none (by simp)
+    (List.replicate p none ++ List.replicate d (some true) ++ a :: L) R]
+  -- 走位段：参数 `k₂ = d - 2`
+  rw [show List.replicate (B - 2 + 1) none = List.replicate (B - 1) none from by
+    rw [show (B - 2) + 1 = B - 1 from by omega]]
+  rw [show List.replicate d (some true) = List.replicate ((d - 2) + 2) (some true) from by
+    rw [show (d - 2) + 2 = d from by omega]]
+  rw [show (none :: List.replicate (B - 1) none) ++ none :: R
+      = none :: (List.replicate (B - 1) none ++ none :: R) from List.cons_append]
+  rw [segInc_walk_run B p (d - 2) a ha L (List.replicate (B - 1) none ++ none :: R)]
+  rw [show List.replicate ((d - 2) + 2) (some true) = List.replicate d (some true) from by
+    rw [show (d - 2) + 2 = d from by omega]]
+  simp only [replicate_succ_append, List.append_assoc]
 
-end Pnp
+/-- **进位链的 `r` 轮**：左侧 `r` 个满段逐轮擦除，`r` 轮后头回到状态 0、停在剩余左带
+    首格，右侧积累 `r` 轮空白记账。成本 `r * (3B + p + 1)`。
+    `r` carry rounds peel `r` full layers at cost `r * (3B + p + 1)`. -/
+theorem segInc_carryIter (B p r : Nat) (hB : 3 ≤ B) (hp : 1 ≤ p) :
+    ∀ (M : List Sym) (hM : M.head? = some none) (J : List Sym),
+      (segInc B).run (r * (3 * B + p + 1))
+          ⟨(0 : Fin (B + 7)),
+            Tape.mk (chainL p B r ++ M) (List.replicate (B - 1) (some true) ++ none :: J)⟩ =
+        ⟨(0 : Fin (B + 7)),
+          Tape.mk M (List.replicate (B - 1) (some true) ++ none :: chainJunk p B r J)⟩ := by
+  induction r with
+  | zero =>
+      intro M hM J
+      simp only [chainL, chainJunk, Nat.zero_mul, List.nil_append]
+      rfl
+  | succ r ih =>
+      intro M hM J
+      have hhead : (chainL p B r ++ M).head? = some none := chainL_head_none p B r M hM
+      obtain ⟨M', hM'⟩ : ∃ M', chainL p B r ++ M = none :: M' := by
+        cases h : chainL p B r ++ M with
+        | nil => rw [h] at hhead; simp at hhead
+        | cons a t =>
+            rw [h] at hhead
+            simp only [List.head?_cons, Option.some.injEq] at hhead
+            exact ⟨t, by rw [hhead]⟩
+      rw [show chainL p B (r + 1) ++ M
+          = List.replicate (p + 1) none ++ List.replicate (B - 1) (some true)
+            ++ (chainL p B r ++ M) from by
+        simp only [chainL, List.append_assoc]]
+      rw [hM']
+      rw [show (r + 1) * (3 * B + p + 1)
+          = (3 * B + p + 1) + r * (3 * B + p + 1) from by
+        rw [Nat.succ_mul, Nat.add_comm]]
+      have hrun : ∀ k : Nat, (segInc B).run (3 * B + p + 1 + k)
+          = (segInc B).run (2 * B + p + (B - 1) + 2 + k) := by
+        intro k
+        rw [show 3 * B + p + 1 = 2 * B + p + (B - 1) + 2 from by omega]
+      rw [hrun (r * (3 * B + p + 1))]
+      rw [DTM.run_add (segInc B) (2 * B + p + (B - 1) + 2) (r * (3 * B + p + 1))]
+      rw [segInc_roundC B p (B - 1) hB hp (by omega) none (by simp) M' J]
+      -- 右带整理成「真格串 + 一格空白 + 记账」的形态，接归纳假设
+      rw [show List.replicate (B - 1) (some true) ++ List.replicate (p + 1) none
+            ++ List.replicate (B - 1) none ++ none :: J
+          = List.replicate (B - 1) (some true) ++ none
+            :: (List.replicate p none ++ List.replicate (B - 1) none ++ none :: J) from by
+        simp only [List.replicate_succ, List.cons_append, List.append_assoc]]
+      rw [← hM']
+      rw [ih M hM (List.replicate p none ++ List.replicate (B - 1) none ++ none :: J)]
+      rw [chainJunk_shift]
+
+/-- **进位链整条（满段进位 + 末段加一）**：`r` 个满段逐轮擦除、进位落到 `d` 格段上，
+    末段加一后停机于接受态；`r = 0` 即「直接加一」。
+    The full carry chain: peel `r` full segments, then increment a `d`-cell segment. -/
+theorem segInc_carryChain (B p d r : Nat) (hB : 3 ≤ B) (hp : 1 ≤ p) (hd : 2 ≤ d)
+    (hdB : d + 1 < B) (a : Sym) (ha : a ≠ some true) (L R : List Sym) :
+    (segInc B).run (r * (3 * B + p + 1) + (2 * B + p + d + 2) + (d + 1))
+        ⟨(0 : Fin (B + 7)),
+          Tape.mk (chainL p B r ++ List.replicate (p + 1) none
+            ++ List.replicate d (some true) ++ a :: L)
+            (List.replicate (B - 1) (some true) ++ none :: R)⟩ =
+      ⟨(⟨B + 2, by omega⟩ : Fin (B + 7)),
+        Tape.mk (List.replicate (d + 1) (some true) ++ a :: L)
+          (List.replicate p none ++ List.replicate (B - 1) none
+            ++ none :: chainJunk p B r R)⟩ := by
+  rw [show r * (3 * B + p + 1) + (2 * B + p + d + 2) + (d + 1)
+      = (r * (3 * B + p + 1) + (2 * B + p + d + 2)) + (d + 1) from rfl]
+  rw [DTM.run_add (segInc B) (r * (3 * B + p + 1) + (2 * B + p + d + 2)) (d + 1)]
+  rw [DTM.run_add (segInc B) (r * (3 * B + p + 1)) (2 * B + p + d + 2)]
+  rw [show chainL p B r ++ List.replicate (p + 1) none ++ List.replicate d (some true)
+        ++ a :: L
+      = chainL p B r ++ (List.replicate (p + 1) none ++ List.replicate d (some true)
+        ++ a :: L) from by
+    simp only [List.append_assoc]]
+  have hM : (List.replicate (p + 1) none ++ List.replicate d (some true) ++ a :: L).head?
+      = some none := by
+    rw [show List.replicate (p + 1) none = none :: List.replicate p none from by
+      rw [List.replicate_succ]]
+    simp only [List.cons_append, List.head?_cons]
+  rw [segInc_carryIter B p r hB hp
+    (List.replicate (p + 1) none ++ List.replicate d (some true) ++ a :: L) hM R]
+  rw [segInc_roundC B p d hB hp hd a ha L (chainJunk p B r R)]
+  rw [show List.replicate d (some true) ++ List.replicate (p + 1) none
+        ++ List.replicate (B - 1) none ++ none :: chainJunk p B r R
+      = List.replicate d (some true) ++ none
+        :: (List.replicate p none ++ List.replicate (B - 1) none
+          ++ none :: chainJunk p B r R) from by
+    simp only [List.replicate_succ, List.cons_append, List.append_assoc]]
+  rw [segInc_run_done B d hdB (a :: L)
+    (List.replicate p none ++ List.replicate (B - 1) none ++ none :: chainJunk p B r R)]
