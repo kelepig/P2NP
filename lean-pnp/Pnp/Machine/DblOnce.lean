@@ -688,10 +688,9 @@ def dblChained : DTM (4 + 3 + 1) where
 theorem dblChained_step_accept (a : Sym) :
     dblChained.step (Fin.castLE (by omega) dblOnce.accept) a
       = ((⟨0, by omega⟩ : Fin (4 + 3 + 1)), a, Dir.stay) := by
-  have hval : (Fin.castLE (by omega) dblOnce.accept).val = 6 := by
-    rw [Fin.val_castLE]
-    rfl
-  simp [dblChained, hval]
+  have hval : dblOnce.accept.val = 6 := rfl
+  simp only [dblChained, Fin.val_castLE]
+  rw [if_pos hval]
 
 /-- 链式机的转移在 `dblOnce` 的非接受状态上照抄 `dblOnce`。
     The chained machine copies `dblOnce`'s transitions away from its accept state. -/
@@ -747,10 +746,22 @@ theorem dblChained_round (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
     dblChained.run (dblOnceSteps m + 1)
       ⟨dblChained.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
     ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
-  -- 前段照搬 `dblOnce`
+  -- 起点换成 `run_embed` 输出的嵌入形态（`Fin.castLE` 版本，与起始态 0 只是 defeq）
+  show dblChained.run (dblOnceSteps m + 1)
+      ⟨Fin.castLE (by omega) dblOnce.start,
+        Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+    ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩
+  -- 前段照搬 `dblOnce` 的整轮
   have hemb := dblChained_run_embed (dblOnceSteps m)
     ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ (dblOnce_no_halt m hm L)
   rw [dblOnce_run m hm L] at hemb
+  -- 整理投影/结构字面量的形态（与目标同形）
+  have hemb' : dblChained.run (dblOnceSteps m)
+      ⟨Fin.castLE (by omega) dblOnce.start,
+        Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+      ⟨Fin.castLE (by omega) dblOnce.accept,
+        Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+    simpa using hemb
   -- 收尾步：接受态 6 → 起始态 0（原地、纸带不变）
   have hnh2 : dblChained.halted
       ⟨Fin.castLE (by omega) dblOnce.accept,
@@ -768,7 +779,7 @@ theorem dblChained_round (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
     · intro h
       have hv := congrArg Fin.val h
       rw [Fin.val_castLE] at hv
-      have h2 : dblOnce.reject.val = 6 := rfl
+      have h2 : dblOnce.accept.val = 6 := rfl
       rw [h2] at hv
       have h3 : dblChained.reject.val = 7 := rfl
       rw [h3] at hv
@@ -776,13 +787,13 @@ theorem dblChained_round (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
   have hstep : dblChained.stepConfig
       ⟨Fin.castLE (by omega) dblOnce.accept,
         Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ =
-      ⟨dblChained.start,
+      ⟨(⟨0, by omega⟩ : Fin (4 + 3 + 1)),
         Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
     rw [DTM.stepConfig, dblChained_step_accept]
-    simp [Tape.write_read]
-  rw [DTM.run_add dblChained (dblOnceSteps m) 1, hemb]
+    simp [Tape.write_read, Tape.move]
+  rw [DTM.run_add dblChained (dblOnceSteps m) 1, hemb']
   rw [DTM.run_succ_of_not_halted dblChained 0 _ hnh2]
-  simpa [DTM.run] using hstep
+  simpa [DTM.run, dblChained] using hstep
 
 /-- `r` 轮链式倍增的总步数（每轮长度随计数翻倍而不同）。
     Total step count of `r` chained doubling rounds. -/
@@ -798,13 +809,14 @@ theorem dblChained_rounds (r m : Nat) (hm : 1 ≤ m) (L : List Sym) :
       ⟨dblChained.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
     ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m * 2 ^ r) ++ [none])⟩ := by
   induction r generalizing m with
-  | zero => rfl
+  | zero => simp [dblChainSteps, DTM.run]
   | succ r ih =>
       rw [dblChainSteps,
         DTM.run_add dblChained (dblChainSteps r m) (dblOnceSteps (m * 2 ^ r) + 1),
         ih m hm,
         dblChained_round (m * 2 ^ r)
-          (show 1 ≤ m * 2 ^ r from Nat.mul_pos (by omega) (Nat.pow_pos (by decide) r)) L]
+          (show 1 ≤ m * 2 ^ r from
+            Nat.mul_pos (by omega) (Nat.pow_pos (by decide : 0 < 2))) L]
       -- 指数对齐：`m·2^r + m·2^r = m·2^(r+1)`
       have h : m * 2 ^ r + (m * 2 ^ r) = m * 2 ^ (r + 1) := by
         rw [Nat.pow_succ, ← Nat.mul_add m (2 ^ r) (2 ^ r),
