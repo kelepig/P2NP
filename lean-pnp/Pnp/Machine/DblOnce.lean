@@ -406,20 +406,24 @@ def dblOnce : DTM (4 + 3) := seqComp doubleStep restoreLeft
 @[simp] theorem restoreLeft_accept : restoreLeft.accept = (2 : Fin 3) := rfl
 @[simp] theorem dblOnce_start : dblOnce.start = (0 : Fin (4 + 3)) := rfl
 
-/-- 单机倍增的步数：倍增循环 + 右扫整块 + 接受步 + 切换步 + 左向恢复中段 + 收尾步。
-    Step count of `dblOnce`. -/
-def dblOnceSteps (m : Nat) : Nat :=
-  doubleLoopSteps m 0 + (m + m) + 1 + 1 + (m + m + 1) + 1
+/-- 单机倍增「除收尾步外」的步数：倍增循环 + 右扫整块 + 接受步 + 切换步 + 左向恢复中段。
+    Step count of `dblOnce` without the final accepting step. -/
+def dblOncePreSteps (m : Nat) : Nat :=
+  doubleLoopSteps m 0 + (m + m) + 1 + 1 + (m + m + 1)
 
-/-- **单机倍增主定理**：`dblOnce` 把 `⟨[none] ++ L, unary m ++ [none]⟩` 变成
-    `⟨[none] ++ L, unary (2m) ++ [none]⟩`（`m ≥ 1`），共 `dblOnceSteps m` 步，
-    终态为接受态。输入输出形状相同 ⇒ 可迭代驱动（同 `unary_dbl_spec`）。
-    The single-machine doubling: same input/output shape, so it can be driven round
-    after round by one controller. -/
-theorem dblOnce_run (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
-    dblOnce.run (dblOnceSteps m)
+/-- 单机倍增的步数：`dblOncePreSteps` 再走一步（恢复收尾、进入接受态）。
+    Step count of `dblOnce` (the pre-part plus the final accepting step). -/
+def dblOnceSteps (m : Nat) : Nat := dblOncePreSteps m + 1
+
+/-- **单机倍增（收尾步之前）**：`dblOnce` 跑完倍增循环、右扫、切换与恢复中段后，
+    停在状态 `natAdd 4 1`（左向恢复的走位态，尚未接受），纸带已是 `unary (2m)` 但
+    头还没回到块首。
+    `dblOnce` up to (but excluding) the final accepting step. -/
+theorem dblOnce_run_pre (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblOnce.run (dblOncePreSteps m)
       ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
-    ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+    ⟨Fin.natAdd 4 (1 : Fin 3),
+      Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ := by
   -- 起点纸带 / 各阶段纸带
   have h_loop := unary_double_trailing_ctx m hm L
   -- ① 倍增循环段
@@ -557,37 +561,6 @@ theorem dblOnce_run (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
       ⟨(0 : Fin 3), Tape.mk (List.replicate (m + m) (some false) ++ ([none] ++ L)) [none]⟩ hnh
     rw [hpre] at hemb
     exact hemb
-  -- ⑥ 恢复收尾步（读人工空白、右移进入接受态）
-  have hB2 : dblOnce.run 1
-      ⟨Fin.natAdd 4 (1 : Fin 3),
-        Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ =
-      ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
-    have hnh : dblOnce.halted
-        ⟨Fin.natAdd 4 (1 : Fin 3),
-          Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ = false := by
-      rw [DTM.halted, Bool.or_eq_false_iff]
-      refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
-      · intro h
-        have hv := congrArg Fin.val h
-        simp only [Fin.val_natAdd] at hv
-        have hv2 : dblOnce.accept.val = 4 + 2 := rfl
-        omega
-      · intro h
-        have hv := congrArg Fin.val h
-        simp only [Fin.val_natAdd] at hv
-        have hv2 : dblOnce.reject.val = 4 + 2 := rfl
-        omega
-    have hstep : dblOnce.stepConfig
-        ⟨Fin.natAdd 4 (1 : Fin 3),
-          Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ =
-        ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
-      show (seqComp doubleStep restoreLeft).stepConfig
-        ⟨Fin.natAdd 4 (1 : Fin 3),
-          Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ = _
-      rw [DTM.stepConfig, seqComp_step_natAdd]
-      rfl
-    rw [DTM.run_succ_of_not_halted dblOnce 0 _ hnh]
-    simpa [DTM.run] using hstep
   -- 拼装：按左结合的段序逐段剥离
   have h12 : dblOnce.run (doubleLoopSteps m 0 + (m + m))
       ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
@@ -610,10 +583,233 @@ theorem dblOnce_run (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
         Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ := by
     rw [DTM.run_add dblOnce (doubleLoopSteps m 0 + (m + m) + 1 + 1) (m + m + 1),
       h1234, hB1]
-  rw [show dblOnceSteps m
-        = doubleLoopSteps m 0 + (m + m) + 1 + 1 + (m + m + 1) + 1 from rfl]
-  rw [DTM.run_add dblOnce (doubleLoopSteps m 0 + (m + m) + 1 + 1 + (m + m + 1)) 1,
-    hall, hB2]
+  rw [show dblOncePreSteps m
+        = doubleLoopSteps m 0 + (m + m) + 1 + 1 + (m + m + 1) from rfl]
+  exact hall
+
+
+/-! ### 多轮倍增（轮间自动重启） -/
+
+/-- 恢复中段终点（状态 `natAdd 4 1`）不是终止态。
+    The mid-point configuration of `dblOnce` is not terminal. -/
+theorem dblOnce_mid_halted (m : Nat) (L : List Sym) :
+    dblOnce.halted
+      ⟨Fin.natAdd 4 (1 : Fin 3),
+        Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [Fin.val_natAdd] at hv
+    have hv2 : dblOnce.accept.val = 4 + 2 := rfl
+    omega
+  · intro h
+    have hv := congrArg Fin.val h
+    simp only [Fin.val_natAdd] at hv
+    have hv2 : dblOnce.reject.val = 4 + 2 := rfl
+    omega
+
+/-- 单机倍增的收尾一步（读人工空白、右移进入接受态）。
+    The final accepting step of `dblOnce`. -/
+theorem dblOnce_last (m : Nat) (L : List Sym) :
+    dblOnce.run 1
+      ⟨Fin.natAdd 4 (1 : Fin 3),
+        Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ =
+      ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+  have hnh := dblOnce_mid_halted m L
+  have hstep : dblOnce.stepConfig
+      ⟨Fin.natAdd 4 (1 : Fin 3),
+        Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ =
+      ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+    show (seqComp doubleStep restoreLeft).stepConfig
+      ⟨Fin.natAdd 4 (1 : Fin 3),
+        Tape.mk L (none :: List.replicate (m + m) (some true) ++ [none])⟩ = _
+    rw [DTM.stepConfig, seqComp_step_natAdd]
+    rfl
+  rw [DTM.run_succ_of_not_halted dblOnce 0 _ hnh]
+  simpa [DTM.run] using hstep
+
+/-- **单机倍增主定理**：`dblOnce` 把 `⟨[none] ++ L, unary m ++ [none]⟩` 变成
+    `⟨[none] ++ L, unary (2m) ++ [none]⟩`（`m ≥ 1`），共 `dblOnceSteps m` 步，
+    终态为接受态。输入输出形状相同 ⇒ 可逐轮驱动（同 `unary_dbl_spec`）。
+    The single-machine doubling: same input/output shape, so it can be driven round
+    after round. -/
+theorem dblOnce_run (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblOnce.run (dblOnceSteps m)
+      ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+    ⟨dblOnce.accept, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+  rw [show dblOnceSteps m = dblOncePreSteps m + 1 from rfl,
+    DTM.run_add dblOnce (dblOncePreSteps m) 1, dblOnce_run_pre m hm L, dblOnce_last m L]
+
+/-- **整轮不停机**：`dblOnce` 在 `dblOnceSteps m` 步内从未停机（唯一终止在最后一步）。
+    `dblOnce` never halts before its last step. -/
+theorem dblOnce_no_halt (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    ∀ k, k < dblOnceSteps m →
+      dblOnce.halted
+        (dblOnce.run k ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩) = false := by
+  intro k hk
+  by_cases hk' : k < dblOncePreSteps m
+  · refine halted_false_before dblOnce (dblOncePreSteps m)
+      ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ ?_ ?_ k hk'
+    · intro h
+      rw [show (dblOnce.run (dblOncePreSteps m)
+            ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩).state
+          = Fin.natAdd 4 (1 : Fin 3) from by rw [dblOnce_run_pre m hm L]] at h
+      exact absurd h (by decide)
+    · intro h
+      rw [show (dblOnce.run (dblOncePreSteps m)
+            ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩).state
+          = Fin.natAdd 4 (1 : Fin 3) from by rw [dblOnce_run_pre m hm L]] at h
+      exact absurd h (by decide)
+  · have hs : dblOnceSteps m = dblOncePreSteps m + 1 := rfl
+    have hk1 : k = dblOncePreSteps m := by omega
+    subst hk1
+    rw [dblOnce_run_pre m hm L]
+    exact dblOnce_mid_halted m L
+
+/-- 轮间自动重启的倍增机：状态 `0..6` 与 `dblOnce` 相同，但 `dblOnce` 的接受态 6
+    被改写成「原地回到起始态 0」（不写、不动），因而每轮结束后立刻开始下一轮；
+    机器本身**永不接受**（接受/拒绝占位态 7 不可达）。
+    The chained doubling machine: `dblOnce`'s accept state is redirected back to the start,
+    so rounds follow each other automatically; the machine never halts. -/
+def dblChained : DTM (4 + 3 + 1) where
+  step := fun s a =>
+    if s.val = 6 then ((⟨0, by omega⟩ : Fin (4 + 3 + 1)), a, Dir.stay)
+    else if h : s.val < 7 then
+      let r := dblOnce.step ⟨s.val, h⟩ a
+      (Fin.castLE (by omega) r.1, r.2)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 7
+  reject := 7
+
+/-- 链式机在 `dblOnce` 接受态上的转移：原地回到起始态（写回读到的符号、不动）。
+    The chained transition at `dblOnce`'s accept state: back to the start, tape untouched. -/
+theorem dblChained_step_accept (a : Sym) :
+    dblChained.step (Fin.castLE (by omega) dblOnce.accept) a
+      = ((⟨0, by omega⟩ : Fin (4 + 3 + 1)), a, Dir.stay) := by
+  have hval : (Fin.castLE (by omega) dblOnce.accept).val = 6 := by
+    rw [Fin.val_castLE]
+    rfl
+  simp [dblChained, hval]
+
+/-- 链式机的转移在 `dblOnce` 的非接受状态上照抄 `dblOnce`。
+    The chained machine copies `dblOnce`'s transitions away from its accept state. -/
+theorem dblChained_step_castLE (s : Fin 7) (a : Sym) (hne : s ≠ dblOnce.accept) :
+    dblChained.step (Fin.castLE (by omega) s) a
+      = (Fin.castLE (by omega) (dblOnce.step s a).1, (dblOnce.step s a).2) := by
+  have hv : s.val ≠ 6 := by
+    intro h
+    apply hne
+    have hacc : dblOnce.accept = (⟨6, by omega⟩ : Fin 7) := rfl
+    rw [hacc]
+    exact Fin.ext h
+  have hlt : s.val < 7 := s.isLt
+  simp only [dblChained, Fin.val_castLE]
+  rw [if_neg (by simpa using hv)]
+  rw [dif_pos hlt]
+
+/-- 链式机的接受/拒绝占位态不会与左侧状态重合（左侧状态的值 < 7）。
+    The placeholder terminal state never coincides with a `dblOnce`-side state. -/
+theorem dblChained_halt_castLE (s : Fin 7) :
+    dblChained.accept ≠ Fin.castLE (by omega) s
+      ∧ dblChained.reject ≠ Fin.castLE (by omega) s := by
+  constructor
+  · intro h
+    have hv := congrArg Fin.val h
+    rw [Fin.val_castLE] at hv
+    have h2 : dblChained.accept.val = 7 := rfl
+    rw [h2] at hv
+    have h3 := s.isLt
+    omega
+  · intro h
+    have hv := congrArg Fin.val h
+    rw [Fin.val_castLE] at hv
+    have h2 : dblChained.reject.val = 7 := rfl
+    rw [h2] at hv
+    have h3 := s.isLt
+    omega
+
+/-- 链式机照搬 `dblOnce` 的任意一段运行（`dblOnce` 在这段内不停机）。
+    Chained runs mirror `dblOnce` runs as long as `dblOnce` does not halt. -/
+theorem dblChained_run_embed (n : Nat) (c : Config 7)
+    (hnh : ∀ k, k < n → dblOnce.halted (dblOnce.run k c) = false) :
+    dblChained.run n ⟨Fin.castLE (by omega) c.state, c.tape⟩ =
+      ⟨Fin.castLE (by omega) (dblOnce.run n c).state, (dblOnce.run n c).tape⟩ :=
+  run_embed dblOnce dblChained (Fin.castLE (by omega))
+    (fun s a ha _ => dblChained_step_castLE s a ha)
+    (fun s _ _ => dblChained_halt_castLE s) n c hnh
+
+/-- **链式一轮**：跑完一轮倍增后**自动回到起始态**，纸带已是 `unary (2m)`，
+    共 `dblOnceSteps m + 1` 步。
+    One chained round: same tape effect as `dblOnce`, but back in the start state. -/
+theorem dblChained_round (m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblChained.run (dblOnceSteps m + 1)
+      ⟨dblChained.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+    ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+  -- 前段照搬 `dblOnce`
+  have hemb := dblChained_run_embed (dblOnceSteps m)
+    ⟨dblOnce.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ (dblOnce_no_halt m hm L)
+  rw [dblOnce_run m hm L] at hemb
+  -- 收尾步：接受态 6 → 起始态 0（原地、纸带不变）
+  have hnh2 : dblChained.halted
+      ⟨Fin.castLE (by omega) dblOnce.accept,
+        Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ = false := by
+    rw [DTM.halted, Bool.or_eq_false_iff]
+    refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+    · intro h
+      have hv := congrArg Fin.val h
+      rw [Fin.val_castLE] at hv
+      have h2 : dblOnce.accept.val = 6 := rfl
+      rw [h2] at hv
+      have h3 : dblChained.accept.val = 7 := rfl
+      rw [h3] at hv
+      exact absurd hv (by decide)
+    · intro h
+      have hv := congrArg Fin.val h
+      rw [Fin.val_castLE] at hv
+      have h2 : dblOnce.reject.val = 6 := rfl
+      rw [h2] at hv
+      have h3 : dblChained.reject.val = 7 := rfl
+      rw [h3] at hv
+      exact absurd hv (by decide)
+  have hstep : dblChained.stepConfig
+      ⟨Fin.castLE (by omega) dblOnce.accept,
+        Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ =
+      ⟨dblChained.start,
+        Tape.mk ([none] ++ L) (unary (m + m) ++ [none])⟩ := by
+    rw [DTM.stepConfig, dblChained_step_accept]
+    simp [Tape.write_read]
+  rw [DTM.run_add dblChained (dblOnceSteps m) 1, hemb]
+  rw [DTM.run_succ_of_not_halted dblChained 0 _ hnh2]
+  simpa [DTM.run] using hstep
+
+/-- `r` 轮链式倍增的总步数（每轮长度随计数翻倍而不同）。
+    Total step count of `r` chained doubling rounds. -/
+def dblChainSteps : Nat → Nat → Nat
+  | 0, _ => 0
+  | r + 1, m => dblChainSteps r m + (dblOnceSteps (m * 2 ^ r) + 1)
+
+/-- **多轮链式倍增**：`dblChained` 自动连跑 `r` 轮，计数 `m ↦ m·2^r`，
+    纸带形状 `⟨[none] ++ L, unary _ ++ [none]⟩` 全程不变、机器全程不停机。
+    `r` chained rounds: `m ↦ m * 2^r` with the tape shape preserved. -/
+theorem dblChained_rounds (r m : Nat) (hm : 1 ≤ m) (L : List Sym) :
+    dblChained.run (dblChainSteps r m)
+      ⟨dblChained.start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩ =
+    ⟨dblChained.start, Tape.mk ([none] ++ L) (unary (m * 2 ^ r) ++ [none])⟩ := by
+  induction r generalizing m with
+  | zero => rfl
+  | succ r ih =>
+      rw [dblChainSteps,
+        DTM.run_add dblChained (dblChainSteps r m) (dblOnceSteps (m * 2 ^ r) + 1),
+        ih m hm,
+        dblChained_round (m * 2 ^ r)
+          (show 1 ≤ m * 2 ^ r from Nat.mul_pos (by omega) (Nat.pow_pos (by decide) r)) L]
+      -- 指数对齐：`m·2^r + m·2^r = m·2^(r+1)`
+      have h : m * 2 ^ r + (m * 2 ^ r) = m * 2 ^ (r + 1) := by
+        rw [Nat.pow_succ, ← Nat.mul_add m (2 ^ r) (2 ^ r),
+          show 2 ^ r + 2 ^ r = 2 ^ r * 2 from by omega]
+      rw [h]
 
 end DTM
 
