@@ -667,6 +667,41 @@ theorem acceptsWithin_of_dummy_branch_acc_uniform (q b B T i T' : Nat) (M : NTM 
   unfold branchBudget
   omega
 
+/-- **分支族可靠性（任意预算）**：只要预算 `K` 覆盖一切前缀通路（`hK`），观察机在该预算内
+    命中即 `M.AcceptsWithin`。统一预算版 `acceptsWithin_of_dummy_branch_acc_uniform` 是
+    `hK` 由 `passRun_steps_le_uniform` 提供的特例。
+    Reliability at an arbitrary budget `K` that covers every prefix pass. -/
+theorem acceptsWithin_of_dummy_branch_acc_budget (q b B T i T' : Nat) (M : NTM q) (w : List Bool)
+    (hB : 0 < B) (hb : B + 2 < 2 ^ b)
+    (hl : ∀ m a, ((M.stutter).step m a).length ≤ B + 1)
+    (Z : Nat) (x : Reg q) (hxM : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hpadpost : (branchBlocks B T i).length + 1 ≤ x.post.length)
+    (hpadpre : (branchBlocks B T i).length + 1 ≤ x.pre.length)
+    (hlen : (branchBlocks B T i).length ≤ T')
+    (hc0 : 0 < 2 ^ b) (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
+    (hxm : x.state = M.start) (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (K : Nat)
+    (hK : ∀ (L1 : List Nat) (hb1 : ∀ k' ∈ L1, k' + 2 < 2 ^ b) (r1 : PassRes q b),
+      L1.length ≤ T' →
+      passRun q b ((M.stutter).haltNorm).step (Z + i % B + 3) (i % B + 1) hk1 x L1 hb1
+        = some r1 → r1.steps + 6 ≤ K)
+    (hHit : ((simObs q b ((M.stutter).haltNorm)).run
+      (roundCostStay x Z (i % B) x.cur + K)
+      ⟨(simObs q b ((M.stutter).haltNorm)).start,
+        x.enc (none :: List.replicate Z (some false)
+          ++ digitArea (i % B :: branchBlocks B T i))⟩).state
+      = obsAcc q b) :
+    M.AcceptsWithin w T' := by
+  refine Classical.byContradiction ?_
+  intro hna
+  have hd := simObs_dummy_prefix q b M x Z (i % B) hc0 hk2 hxM.1 hxm hxacc hxre
+    (branchBlocks B T i)
+  rw [DTM.run_add, hd] at hHit
+  exact branch_no_acc_budget_blocks q b B T i M w T' hB hb hl
+    (Z + i % B + 3) (i % B + 1) hk1
+    x x.state.val x.state.isLt rfl hxM hxw hxM.1 hxM.2 hpadpost hpadpre hlen hna K hK hHit
+
+
 end DTM
 
 end Pnp

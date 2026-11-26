@@ -78,6 +78,34 @@ theorem expand_pad_to_initReg {q : Nat} (st : Fin q) (w : List Bool) (a : Sym) (
   -- 整链
   rw [expand_pad_to_enc st a l' hl T (padStr T ++ L) R]
 
+/-- **输入块 ⇒ `Reg.initReg st w m m`（副垫长度参数化）**：与 `expand_pad_to_initReg` 同链，
+    只把右（和左）副垫的空白格数从 `T+1` 换成任意 `m ≥ 1`；代换 `T := m - 1`。
+    The same assembly chain with the pad size `m` (instead of `T+1`) as a parameter. -/
+theorem expand_pad_to_initReg_pad {q : Nat} (st : Fin q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    (m : Nat) (hm : 1 ≤ m) (L R : List Sym) :
+    markHead.run 1
+      ⟨markHead.start,
+        Tape.moveLeft
+          (moveLeftN (3 * l'.length)
+            (moveLeftN (3 * m)
+              ((writeStr (padStr (m - 1))).run (3 * m)
+                ⟨(writeStr (padStr (m - 1))).start,
+                  (expand.run (expandCost (a :: l'))
+                    ⟨(⟨0, by omega⟩ : Fin 128),
+                      Tape.mk (padStr (m - 1) ++ L) (((a :: l') ++
+                          List.replicate (2 * (a :: l').length + 1) none) ++
+                        (List.replicate (3 * m) none ++ R))⟩).tape⟩).tape))⟩
+      = ⟨markHead.accept,
+          Tape.mk ((Reg.enc (Reg.initReg st w m m) L).left)
+            ((Reg.enc (Reg.initReg st w m m) L).right ++ none :: R)⟩ := by
+  -- 代换 `T := m - 1`，并把 `(m-1)+1`、`3*((m-1)+1)` 归约回 `m`、`3*m`
+  have hs : m - 1 + 1 = m := Nat.sub_add_cancel hm
+  have h := expand_pad_to_initReg st w a l' hw hl (m - 1) L R
+  rw [hs] at h
+  exact h
+
+
 end DTM
 
 end Pnp

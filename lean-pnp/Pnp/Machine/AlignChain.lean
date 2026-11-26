@@ -386,6 +386,27 @@ theorem alignChain_to_initReg {q : Nat} (st : Fin q) (w : List Bool) (a : Sym) (
     congrArg Config.tape hexp
   rw [htape]
 
+/-- **装配机 ⇒ `Reg.initReg st w m m`（副垫参数化）**：与 `alignChain_to_initReg` 同链，
+    副垫空白格数取任意 `m ≥ 1`；代换 `T := m - 1`。
+    Machine-level assembly with a free pad size `m` (`T := m - 1`). -/
+theorem alignChain_to_initReg_pad {q : Nat} (st : Fin q) (w : List Bool) (a : Sym)
+    (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
+    (m : Nat) (hm : 1 ≤ m) (L R : List Sym) :
+    (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1)).run
+      (expandCost (a :: l') + 1
+        + ((padStr (m - 1)).length + 1 + (3 * m + 3 * l'.length + 1 + 1 + 1)))
+      ⟨(alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1)).start,
+        Tape.mk (padStr (m - 1) ++ L) ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
+          ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩
+      = ⟨(alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1)).accept,
+          Tape.mk ((Reg.enc (Reg.initReg st w m m) L).left)
+            ((Reg.enc (Reg.initReg st w m m) L).right ++ none :: R)⟩ := by
+  have hs : m - 1 + 1 = m := Nat.sub_add_cancel hm
+  have h := alignChain_to_initReg st w a l' hw hl (m - 1) L R
+  rw [hs] at h
+  exact h
+
+
 /-- **区域装配整机在自己的步数内不停机**（`seqComp_no_halt` 的整机版，供相位串接使用）。
     The whole region-assembly machine never halts before its final step. -/
 theorem alignChain_halted_false (pad : List Sym) (n : Nat) (l' : List Sym)
