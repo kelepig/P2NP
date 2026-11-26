@@ -239,3 +239,90 @@ theorem mulCopy_skip5_none : ∀ (m : Nat) (P R : List Sym),
 end DTM
 
 end Pnp
+
+namespace Pnp
+
+namespace DTM
+
+/-- 复制遍不变量左带：A 的未读段 + `sepB` + B 区 + 双哨兵 + 外部上下文。
+    Left side of the copy-pass invariant. -/
+abbrev mulL (a b r i : Nat) (L : List Sym) : List Sym :=
+  List.replicate (a - 1 - i) (some true) ++
+    (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+      (none :: (none :: L))))
+
+/-- 复制遍不变量右带：当前源格 + 已标记源格 + `sepA` + 副本区（`d` 格）+ 前沿空白 +
+    预留空白 + 外部尾。
+    Right side of the copy-pass invariant. -/
+abbrev mulR (d i w : Nat) (R : List Sym) : List Sym :=
+  some true :: (List.replicate i (some false) ++
+    (none :: (List.replicate d (some false) ++ (none :: (List.replicate w (none : Sym) ++ R)))))
+
+/-- 跨 `sepA` 回到 A 侧（左邻是 `k + 1` 个 `some false` 的连续块）。
+    Cross `sepA` back when the source side starts with a `k + 1` block. -/
+theorem mulCopy_cross4_rep (k : Nat) (P : List Sym) (x1 : Sym) (R : List Sym) :
+    mulCopy.run 1
+      ⟨(⟨4, by omega⟩ : Fin 8),
+        Tape.mk (List.replicate (k + 1) (some false) ++ P) (none :: x1 :: R)⟩
+      = ⟨(⟨5, by omega⟩ : Fin 8),
+          Tape.mk (List.replicate k (some false) ++ P) (some false :: none :: x1 :: R)⟩ := by
+  rw [List.replicate_succ, List.cons_append]
+  exact mulCopy_cross4 (some false) (List.replicate k (some false) ++ P) x1 R
+
+/-- **第一轮的第一个复制单元**（副本区为空）：`6` 步推进不变量一格。
+    The very first copy unit (empty copy area): advance the invariant in 6 steps. -/
+theorem mulCopy_first (a b r w : Nat) (ha : 2 ≤ a) (L R : List Sym) :
+    mulCopy.run 6
+      ⟨(⟨0, by omega⟩ : Fin 8), Tape.mk (mulL a b r 0 L) (mulR 0 0 w R)⟩
+      = ⟨(⟨0, by omega⟩ : Fin 8),
+          Tape.mk (mulL a b r 1 L) (mulR 1 1 (w - 1) R)⟩ := by
+  -- 不变量展开成显式形态
+  have hL0 : mulL a b r 0 L = some true :: (List.replicate (a - 1 - 0) (some true) ++
+      (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+        (none :: (none :: L))))) := by
+    simp only [mulL, List.replicate_zero]
+    rfl
+  have hR0 : mulR 0 0 w R = some true :: (none :: (none :: (List.replicate w (none : Sym) ++ R))) := by
+    simp only [mulR, List.replicate_zero, List.nil_append]
+  rw [hL0, hR0]
+  -- 6 = 1 + 1 + 1 + 1 + 2
+  rw [show (6 : Nat) = 1 + (1 + (1 + (1 + 2))) from by omega]
+  rw [DTM.run_add mulCopy 1 (1 + (1 + (1 + 2)))]
+  -- 1 步：标记源格
+  rw [estepMC 0 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
+  etape
+  -- 1 步：跨 sepA
+  rw [DTM.run_add mulCopy 1 (1 + (1 + 2))]
+  rw [mulCopy_cross1 (some false :: (List.replicate (a - 1 - 0) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L)))))) none (List.replicate w (none : Sym) ++ R)]
+  -- 1 步：在空副本区前沿写副本
+  rw [DTM.run_add mulCopy 1 (1 + 2)]
+  rw [mulCopy_write2_none (some false :: (List.replicate (a - 1 - 0) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L)))))) (List.replicate w (none : Sym) ++ R)]
+  -- 1 步：跨回 sepA
+  rw [DTM.run_add mulCopy 1 2]
+  rw [show List.replicate (0 : Nat) (some false) ++ (some false :: (List.replicate (a - 1 - 0) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L))))))
+      = List.replicate 1 (some false) ++ (List.replicate (a - 1 - 0) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L))))) from by
+    simp only [List.replicate_succ, List.replicate_zero, List.nil_append]]
+  rw [mulCopy_cross4 (some false) (List.replicate (a - 1 - 0) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L))))) (some false) (List.replicate w (none : Sym) ++ R)]
+  -- 2 步：读到下一个源格
+  rw [mulCopy_skip5_true 0 (List.replicate (a - 1 - 1) (some true) ++
+        (none :: (List.replicate (b - r) (some true) ++ List.replicate r (some false) ++
+          (none :: (none :: L)))))
+      (none :: (some false :: (List.replicate w (none : Sym) ++ R)))]
+  -- 形状对齐：`replicate (a - 2) = replicate (a - 1 - 1)`；前沿空白拆一个
+  rw [show List.replicate w (none : Sym) = none :: List.replicate (w - 1) (none : Sym) from by
+    rw [show w = (w - 1) + 1 from by omega, List.replicate_succ]]
+  simp only [mulL, mulR, List.replicate_succ, List.cons_append]
+
+end DTM
+
+end Pnp
