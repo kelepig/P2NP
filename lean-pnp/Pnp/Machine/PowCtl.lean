@@ -802,8 +802,8 @@ theorem powCtl_exhaust_pos (R c m : Nat) (F Rt : List Sym) :
     Lifting the whole `dblRounds R` run into the controller's right block. -/
 theorem powCtl_run_dbl (R m : Nat) (hm : 1 ≤ m) (L : List Sym) :
     (powCtl R).run (dblRoundsSteps R m)
-      ⟨dblEmb R (dblRounds R).start, Tape.mk ([none] ++ L) (unary m ++ [none])⟩
-      = ⟨dblEmb R (dblRounds R).accept, Tape.mk ([none] ++ L) (unary (m * 2 ^ R) ++ [none])⟩ := by
+      ⟨dblEmb R (dblRounds R).start, Tape.mk (none :: L) (unary m ++ [none])⟩
+      = ⟨dblEmb R (dblRounds R).accept, Tape.mk (none :: L) (unary (m * 2 ^ R) ++ [none])⟩ := by
   have hmain := run_embed (dblRounds R) (powCtl R) (dblEmb R)
     (fun s a hna _ => powCtl_step_dbl R s a hna)
     (fun s _ _ => by
@@ -851,6 +851,282 @@ theorem powCtl_back (R : Nat) (a : Sym) (M Rt : List Sym) :
             : Fin (7 * R + 1)) = (dblRounds R).accept
           exact Fin.ext (by show 6 + (dblRounds R).accept.val - 6
             = (dblRounds R).accept.val; omega))])
+
+/-- `unary L` 的首格拆分（`L ≥ 1`）：`unary L = some true :: unary (L-1)`（用 `replicate` 写）。
+    Splitting off the first cell of `unary L` (`L ≥ 1`). -/
+theorem unary_eq_cons_rep (L : Nat) (hL : 1 ≤ L) :
+    unary L = some true :: List.replicate (L - 1) (some true) := by
+  cases L with
+  | zero => omega
+  | succ k =>
+      show some true :: List.replicate k (some true)
+        = some true :: List.replicate (k + 1 - 1) (some true)
+      rw [Nat.succ_sub_one]
+
+/-- `unary L` 的「首格 + 余下 ++ T」形态（`L ≥ 1`）：消费相位输出 → 倍增段输入的桥。
+    Restoring `unary L ++ T` from the `head ++ rest ++ T` form (`L ≥ 1`). -/
+theorem unary_append_tail (L : Nat) (hL : 1 ≤ L) (T : List Sym) :
+    some true :: (List.replicate (L - 1) (some true) ++ T) = unary L ++ T := by
+  rw [← List.cons_append, (unary_eq_cons_rep L hL).symm]
+
+/-- **一轮完整迭代（尚无已消费格）**：消费 1 个 n 单元（7 步）+ R 轮倍增
+    （`dblRoundsSteps R L` 步）+ 回相位 0（1 步）；值块长度 `L ↦ L · 2^R`。
+    One full round with nothing consumed yet: consume (7) + R doublings + back. -/
+theorem powCtl_round_zero (R r L : Nat) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (7 + dblRoundsSteps R L + 1)
+      ⟨(powCtl R).start,
+        Tape.mk (none :: (some true :: (List.replicate r (some true) ++ none :: F)))
+          (unary L ++ [none])⟩
+      = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩ := by
+  have hL1 : 1 ≤ L * 2 ^ R :=
+    Nat.succ_le_of_lt (Nat.mul_pos (by omega) (Nat.pow_pos (by decide : 0 < 2)))
+  have hsplit := unary_eq_cons_rep L hL
+  have hsplit' := unary_eq_cons_rep (L * 2 ^ R) hL1
+  show (powCtl R).run (7 + dblRoundsSteps R L + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some true :: (List.replicate r (some true) ++ none :: F)))
+          (unary L ++ [none])⟩
+      = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩
+  rw [DTM.run_add (powCtl R) (7 + dblRoundsSteps R L) 1]
+  rw [DTM.run_add (powCtl R) 7 (dblRoundsSteps R L)]
+  -- 消费段：纸带整理成「首格 + 其余」形态
+  -- 消费段：纸带整理成「首格 + 其余」形态
+  rw [unary_eq_cons_rep L hL, List.cons_append]
+  rw [powCtl_consume_zero R r (L - 1) F []]
+  -- 倍增段：纸带恢复成 `unary L ++ [none]`
+  rw [unary_append_tail L hL]
+  rw [powCtl_run_dbl R L hL
+    (some false :: (List.replicate r (some true) ++ none :: F))]
+  -- 回相位 0 一步
+  rw [unary_eq_cons_rep (L * 2 ^ R) hL1, List.cons_append]
+  rw [powCtl_back R (some true)
+    (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+    (List.replicate (L * 2 ^ R - 1) (some true) ++ [none])]
+
+/-- **一轮完整迭代（已有已消费格）**：消费 1 个 n 单元（`2c+9` 步）+ R 轮倍增 + 回相位 0。
+    One full round below `c + 1` consumed cells; the value still doubles (`L ↦ L · 2^R`). -/
+theorem powCtl_round_pos (R c r L : Nat) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (2 * c + 9 + dblRoundsSteps R L + 1)
+      ⟨(powCtl R).start,
+        Tape.mk (none :: (some false :: (List.replicate c (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F)))))
+          (unary L ++ [none])⟩
+      = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk (none :: (List.replicate (c + 2) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩ := by
+  have hL1 : 1 ≤ L * 2 ^ R :=
+    Nat.succ_le_of_lt (Nat.mul_pos (by omega) (Nat.pow_pos (by decide : 0 < 2)))
+  have hsplit := unary_eq_cons_rep L hL
+  have hsplit' := unary_eq_cons_rep (L * 2 ^ R) hL1
+  show (powCtl R).run (2 * c + 9 + dblRoundsSteps R L + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate c (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F)))))
+          (unary L ++ [none])⟩
+      = ⟨(⟨0, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk (none :: (List.replicate (c + 2) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩
+  rw [DTM.run_add (powCtl R) (2 * c + 9 + dblRoundsSteps R L) 1]
+  rw [DTM.run_add (powCtl R) (2 * c + 9) (dblRoundsSteps R L)]
+  rw [unary_eq_cons_rep L hL, List.cons_append]
+  rw [powCtl_consume_pos R c r (L - 1) F []]
+  rw [unary_append_tail L hL]
+  rw [powCtl_run_dbl R L hL
+    (List.replicate (c + 2) (some false)
+      ++ (List.replicate r (some true) ++ none :: F))]
+  rw [unary_eq_cons_rep (L * 2 ^ R) hL1, List.cons_append]
+  rw [powCtl_back R (some true)
+    (none :: (List.replicate (c + 2) (some false)
+      ++ (List.replicate r (some true) ++ none :: F)))
+    (List.replicate (L * 2 ^ R - 1) (some true) ++ [none])]
+
+/-- `replicate j (some false)` 的首格拆分（`j ≥ 1`）。 Splitting off the first consumed cell. -/
+theorem rep_false_pos (j : Nat) (hj : 1 ≤ j) :
+    List.replicate j (some false) = some false :: List.replicate (j - 1) (some false) := by
+  cases j with
+  | zero => omega
+  | succ k =>
+      show some false :: List.replicate k (some false)
+        = some false :: List.replicate (k + 1 - 1) (some false)
+      rw [Nat.succ_sub_one]
+
+/-- 已消费段的首格拆分（带尾随串）：`some false :: (rep^(j-1) false ++ T) = rep^j false ++ T`。
+    Splitting the consumed prefix with an arbitrary tail (`j ≥ 1`). -/
+theorem rep_false_pos_tail (j : Nat) (hj : 1 ≤ j) (T : List Sym) :
+    some false :: (List.replicate (j - 1) (some false) ++ T)
+      = List.replicate j (some false) ++ T := by
+  rw [← List.cons_append, (rep_false_pos j hj).symm]
+
+/-- 连续消费 `us`（每项代表一个未消费的 n 单元）的总步数：`j` = 已消费轮数，
+    `L` = 当前值块长度。Total cost of consuming the units `us` (with `j` rounds done). -/
+def powCtlUsCost (R : Nat) : Nat → Nat → List Sym → Nat
+  | _, _, [] => 0
+  | j, L, _ :: us => (2 * j + 7 + dblRoundsSteps R L + 1) + powCtlUsCost R (j + 1) (L * 2 ^ R) us
+
+/-- 值块长度的多轮倍增：`L · 2^(R·(r+1)) = (L · 2^R) · 2^(R·r)`。
+    Value-block arithmetic for one more round. -/
+theorem powVal_succ (R L r : Nat) :
+    L * 2 ^ (R * (r + 1)) = (L * 2 ^ R) * 2 ^ (R * r) := by
+  rw [Nat.mul_succ, Nat.add_comm (R * r) R, Nat.pow_add, ← Nat.mul_assoc]
+
+/-- **第 0 轮（`j = 0` 形）**：消费一个单元 + R 轮倍增 + 回相位 0。
+    Round `0` in the `j`-indexed form. -/
+theorem powCtl_round_j_zero (R r L : Nat) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (2 * 0 + 7 + dblRoundsSteps R L + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (List.replicate 0 (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F))))
+          (unary L ++ [none])⟩
+      = ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate 1 (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩ :=
+  powCtl_round_zero R r L hL F
+
+/-- **第 `j ≥ 1` 轮（`j` 索引形）**：已消费 `j` 个单元，本轮消费下一个 + R 轮倍增 + 回相位 0。
+    Round `j ≥ 1` in the `j`-indexed form. -/
+theorem powCtl_round_j_pos (R j r L : Nat) (hj : 1 ≤ j) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (2 * j + 7 + dblRoundsSteps R L + 1)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (List.replicate j (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F))))
+          (unary L ++ [none])⟩
+      = ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate (j + 1) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (unary (L * 2 ^ R) ++ [none])⟩ := by
+  have hmain := powCtl_round_pos R (j - 1) r L hL F
+  rw [show 2 * (j - 1) + 9 = 2 * j + 7 from by omega] at hmain
+  rw [show (j - 1) + 2 = j + 1 from by omega] at hmain
+  rw [rep_false_pos_tail j hj] at hmain
+  exact hmain
+
+/-- **连续 `r` 轮的整段运行**：从状态 0、已消费 `j` 个单元出发，把余下 `r` 个单元全部消费，
+    值块长度 `L ↦ L · 2^(R·r)`；全程留在状态 0（每轮结束回到相位 0）。
+    The whole `r`-round run: consume all remaining units, value `L ↦ L · 2^(R·r)`. -/
+theorem powCtl_units (R r : Nat) (F : List Sym) :
+    ∀ (j L : Nat), 1 ≤ L →
+      (powCtl R).run (powCtlUsCost R j L (List.replicate r (some true)))
+        ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate j (some false)
+            ++ (List.replicate r (some true) ++ none :: F)))
+            (unary L ++ [none])⟩
+        = ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+            Tape.mk (none :: (List.replicate j (some false)
+              ++ (List.replicate r (some false) ++ none :: F)))
+              (unary (L * 2 ^ (R * r)) ++ [none])⟩ := by
+  induction r with
+  | zero =>
+      intro j L hL
+      have hp : L * 2 ^ (R * 0) = L := by rw [Nat.mul_zero, Nat.pow_zero, Nat.mul_one]
+      rw [hp]
+      rfl
+  | succ r ih =>
+      intro j L hL
+      have hL' : 1 ≤ L * 2 ^ R :=
+        Nat.succ_le_of_lt (Nat.mul_pos (by omega) (Nat.pow_pos (by decide : 0 < 2)))
+      -- 步数拆成「本轮 + 余下 r 轮」
+      show (powCtl R).run ((2 * j + 7 + dblRoundsSteps R L + 1)
+          + powCtlUsCost R (j + 1) (L * 2 ^ R) (List.replicate r (some true)))
+        ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate j (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F))))
+            (unary L ++ [none])⟩
+        = ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+            Tape.mk (none :: (List.replicate j (some false)
+              ++ (some false :: (List.replicate r (some false) ++ none :: F))))
+              (unary (L * 2 ^ (R * (r + 1))) ++ [none])⟩
+      rw [DTM.run_add (powCtl R) (2 * j + 7 + dblRoundsSteps R L + 1)
+        (powCtlUsCost R (j + 1) (L * 2 ^ R) (List.replicate r (some true)))]
+      by_cases hj : j = 0
+      · subst hj
+        rw [powCtl_round_j_zero R r L hL F]
+        rw [ih 1 (L * 2 ^ R) hL']
+        rw [powVal_succ R L r]
+        rfl
+      · have hj1 : 1 ≤ j := Nat.pos_of_ne_zero hj
+        rw [powCtl_round_j_pos R j r L hj1 hL F]
+        rw [ih (j + 1) (L * 2 ^ R) hL']
+        rw [powVal_succ R L r]
+        rw [rep_cons_shift j (some false) (List.replicate r (some false) ++ none :: F)]
+        rfl
+
+/-- **U 控制器的整段运行（n 块为空）**：不消费、直接 3 步耗尽停机，值块完好。
+    The whole controller run when the `n` block is empty (three steps, halting). -/
+theorem powCtl_full_zero (R L : Nat) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (powCtlUsCost R 0 L (List.replicate 0 (some true)) + 3)
+      ⟨(powCtl R).start,
+        Tape.mk (none :: (List.replicate 0 (some true) ++ none :: F))
+          (unary L ++ [none])⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (none :: (some true :: (List.replicate (L * 2 ^ (R * 0) - 1) (some true)
+              ++ (none :: [])))))⟩ := by
+  show (powCtl R).run (powCtlUsCost R 0 L (List.replicate 0 (some true)) + 3)
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (List.replicate 0 (some false)
+            ++ (List.replicate 0 (some true) ++ none :: F)))
+          (unary L ++ [none])⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (none :: (some true :: (List.replicate (L * 2 ^ (R * 0) - 1) (some true)
+              ++ (none :: [])))))⟩
+  rw [DTM.run_add (powCtl R) (powCtlUsCost R 0 L (List.replicate 0 (some true))) 3]
+  rw [powCtl_units R 0 F 0 L hL]
+  have hp : L * 2 ^ (R * 0) = L := by rw [Nat.mul_zero, Nat.pow_zero, Nat.mul_one]
+  rw [hp]
+  rw [show List.replicate 0 (some false) = ([] : List Sym) from rfl, List.nil_append,
+    List.nil_append]
+  rw [unary_eq_cons_rep L hL, List.cons_append]
+  rw [powCtl_exhaust_zero R (L - 1) F []]
+
+/-- **U 控制器的整段运行（n 块非空）**：消费全部 `r` 个单元（每轮 R 轮倍增）后耗尽停机；
+    值块长度 `L ↦ L · 2^(R·r)`，停机后仍在纸带上（`some true :: 其余`）。
+    The whole controller run for a nonempty `n` block: consume all units, then halt. -/
+theorem powCtl_full_pos (R r L : Nat) (hr : 1 ≤ r) (hL : 1 ≤ L) (F : List Sym) :
+    (powCtl R).run (powCtlUsCost R 0 L (List.replicate r (some true)) + (r + 3))
+      ⟨(powCtl R).start,
+        Tape.mk (none :: (List.replicate r (some true) ++ none :: F))
+          (unary L ++ [none])⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (List.replicate r (some false)
+              ++ (none :: (some true :: (List.replicate (L * 2 ^ (R * r) - 1) (some true)
+                ++ (none :: []))))))⟩ := by
+  show (powCtl R).run (powCtlUsCost R 0 L (List.replicate r (some true)) + (r + 3))
+      ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (List.replicate 0 (some false)
+            ++ (List.replicate r (some true) ++ none :: F)))
+          (unary L ++ [none])⟩
+      = ⟨(⟨2, by omega⟩ : Fin (7 * R + 8)),
+          Tape.mk F
+            (none :: (List.replicate r (some false)
+              ++ (none :: (some true :: (List.replicate (L * 2 ^ (R * r) - 1) (some true)
+                ++ (none :: []))))))⟩
+  have hL' : 1 ≤ L * 2 ^ (R * r) :=
+    Nat.succ_le_of_lt (Nat.mul_pos (by omega) (Nat.pow_pos (by decide : 0 < 2)))
+  rw [DTM.run_add (powCtl R) (powCtlUsCost R 0 L (List.replicate r (some true))) (r + 3)]
+  rw [powCtl_units R r F 0 L hL]
+  -- 把当前格局的纸带整理成耗尽判据的输入形态
+  have hcfg : (⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (List.replicate 0 (some false)
+            ++ (List.replicate r (some false) ++ none :: F)))
+          (unary (L * 2 ^ (R * r)) ++ [none])⟩ : Config (7 * R + 8))
+      = ⟨emb6 R (⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate (r - 1) (some false) ++ none :: F)))
+          (some true :: (List.replicate (L * 2 ^ (R * r) - 1) (some true) ++ (none :: [])))⟩ := by
+    rw [rep_false_pos r hr, unary_eq_cons_rep (L * 2 ^ (R * r)) hL']
+    rfl
+  rw [hcfg]
+  rw [show r + 3 = (r - 1) + 4 from by omega]
+  rw [powCtl_exhaust_pos R (r - 1) (L * 2 ^ (R * r) - 1) F []]
+  rw [show (r - 1) + 1 = r from Nat.sub_add_cancel hr]
 
 end DTM
 
