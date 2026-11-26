@@ -100,6 +100,92 @@ theorem exists_family_exp_bound (B Bk k C : Nat) :
       _ ≤ 2 ^ (n ^ (K0 + C + 1) + (K0 + C + 1)) :=
           Nat.pow_le_pow_right (by omega) hmono
 
+/-- **含观察机预算的枚举总成本上界**（#241）：E 的逐分支成本取「指数预算覆盖版」
+    ——每分支要写 `kr` 个空白副垫并跑满 `2^((2·2^b+42)·(T+1))` 步观察机；
+    族大小 `(T+1)·B^T` 乘上去仍被某个 `2^(n^K+K)` 吸收（`T = n^k + k`）。
+    Total enumeration cost including the exponential per-branch observer budget is still
+    `2^(n^K+K)`, so EXP affords the budget-covering (exponential padding) design. -/
+theorem exists_family_obsPhase_exp_bound (B b k L C : Nat) :
+    ∃ K : Nat, ∀ n : Nat,
+      (n ^ k + k + 1) * B ^ (n ^ k + k)
+        * (L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C) ≤ 2 ^ (n ^ K + K) := by
+  -- 线性吸收：`A·T + (A+L+C+1) ≤ n^K0 + K0`
+  obtain ⟨K0, hK0⟩ :=
+    exists_poly_pow_bound (B + 2 * 2 ^ b + 43) (B + 2 * 2 ^ b + 43 + L + C + 1) k
+  refine ⟨K0, fun n => ?_⟩
+  -- 三个因子各自换成 2 的幂
+  have h1 : n ^ k + k + 1 ≤ 2 ^ (n ^ k + k + 1) := self_le_two_pow _
+  have h2 : B ^ (n ^ k + k) ≤ 2 ^ (B * (n ^ k + k)) := pow_le_two_pow_mul B _
+  have hL : L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1))
+      ≤ 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1)) := by
+    calc L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1))
+        ≤ 2 ^ L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) :=
+          Nat.mul_le_mul_right _ (self_le_two_pow L)
+      _ = 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1)) := (Nat.pow_add 2 L _).symm
+  -- 常数项 `C` 并入同一个幂
+  have h3 : L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C
+      ≤ 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1) := by
+    have hC : C ≤ 2 ^ C := self_le_two_pow C
+    have hle1 : L + (2 * 2 ^ b + 42) * (n ^ k + k + 1)
+        ≤ L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C := Nat.le_add_right _ _
+    have hle2 : C ≤ L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C := Nat.le_add_left _ _
+    calc L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C
+        ≤ 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1)) + 2 ^ C := Nat.add_le_add hL hC
+      _ ≤ 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1) := add_pow_le hle1 hle2
+  -- 三因子相乘
+  have hmain : (n ^ k + k + 1) * B ^ (n ^ k + k)
+      * (L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C)
+      ≤ 2 ^ ((n ^ k + k + 1) + B * (n ^ k + k)
+        + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)) := by
+    calc (n ^ k + k + 1) * B ^ (n ^ k + k)
+        * (L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C)
+        ≤ 2 ^ (n ^ k + k + 1) * 2 ^ (B * (n ^ k + k))
+          * 2 ^ (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1) :=
+          Nat.mul_le_mul (Nat.mul_le_mul h1 h2) h3
+      _ = 2 ^ ((n ^ k + k + 1) + B * (n ^ k + k)
+          + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)) := by
+          rw [← Nat.pow_add, ← Nat.pow_add]
+  -- 指数线性化并吸收进 `n^K0 + K0`
+  -- 关键：先把 `B * T` 换成 `B * (T+1)`，再整块折成 `(B+2·2^b+43)*(T+1)`
+  have hBT : B * (n ^ k + k) ≤ B * (n ^ k + k + 1) := Nat.mul_le_mul_left B (by omega)
+  have hcoef : 1 + B + (2 * 2 ^ b + 42) ≤ B + 2 * 2 ^ b + 43 := by omega
+  have hsumEq : (1 + B + (2 * 2 ^ b + 42)) * (n ^ k + k + 1)
+      = (n ^ k + k + 1) + B * (n ^ k + k + 1)
+        + (2 * 2 ^ b + 42) * (n ^ k + k + 1) := by
+    rw [Nat.add_mul, Nat.add_mul, Nat.one_mul]
+  have hfac : (n ^ k + k + 1) + B * (n ^ k + k + 1) + (2 * 2 ^ b + 42) * (n ^ k + k + 1)
+      ≤ (B + 2 * 2 ^ b + 43) * (n ^ k + k + 1) := by
+    rw [← hsumEq]
+    exact Nat.mul_le_mul_right _ hcoef
+  have hdist : (B + 2 * 2 ^ b + 43) * (n ^ k + k + 1)
+      = (B + 2 * 2 ^ b + 43) * (n ^ k + k) + (B + 2 * 2 ^ b + 43) := by
+    rw [show n ^ k + k + 1 = (n ^ k + k) + 1 from rfl, Nat.mul_add, Nat.mul_one]
+  have hexp : (n ^ k + k + 1) + B * (n ^ k + k)
+      + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)
+      ≤ (B + 2 * 2 ^ b + 43) * (n ^ k + k)
+        + ((B + 2 * 2 ^ b + 43) + L + C + 1) := by
+    have hstep : (n ^ k + k + 1) + B * (n ^ k + k)
+        + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)
+        ≤ (n ^ k + k + 1) + B * (n ^ k + k + 1)
+          + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + (L + C + 1) := by omega
+    calc (n ^ k + k + 1) + B * (n ^ k + k)
+        + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)
+        ≤ (n ^ k + k + 1) + B * (n ^ k + k + 1)
+          + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + (L + C + 1) := hstep
+      _ ≤ (B + 2 * 2 ^ b + 43) * (n ^ k + k + 1) + (L + C + 1) :=
+          Nat.add_le_add_right hfac _
+      _ = (B + 2 * 2 ^ b + 43) * (n ^ k + k) + (B + 2 * 2 ^ b + 43) + (L + C + 1) := by
+          rw [hdist]
+      _ ≤ (B + 2 * 2 ^ b + 43) * (n ^ k + k)
+          + ((B + 2 * 2 ^ b + 43) + L + C + 1) := by omega
+  calc (n ^ k + k + 1) * B ^ (n ^ k + k)
+      * (L * 2 ^ ((2 * 2 ^ b + 42) * (n ^ k + k + 1)) + C)
+      ≤ 2 ^ ((n ^ k + k + 1) + B * (n ^ k + k)
+        + (L + (2 * 2 ^ b + 42) * (n ^ k + k + 1) + C + 1)) := hmain
+    _ ≤ 2 ^ ((B + 2 * 2 ^ b + 43) * (n ^ k + k)
+        + ((B + 2 * 2 ^ b + 43) + L + C + 1)) := Nat.pow_le_pow_right (by omega) hexp
+    _ ≤ 2 ^ (n ^ K0 + K0) := Nat.pow_le_pow_right (by omega) (hK0 n)
+
 end DTM
 
 end Pnp
