@@ -387,6 +387,49 @@ theorem incChain_run (B : Nat) (hB : 0 < B) :
         rw [hcost, hsucc, DTM.run_add, incChain_round_pop B d hB hd1 ds L G]
         exact hrun₁
 
+/-- 后继序列不会变长（进位只会弹块）。 The successor sequence never grows. -/
+theorem incSucc_length_le (B : Nat) : ∀ (ds : List Nat), (incSucc B ds).length ≤ ds.length
+  | [] => by simp only [incSucc, List.length_nil]; exact Nat.le_refl 0
+  | d :: ds => by
+      by_cases hg : d + 1 < B
+      · simp only [incSucc, if_pos hg, List.length_cons]
+        omega
+      · simp only [incSucc, if_neg hg, List.length_cons]
+        exact Nat.le_trans (incSucc_length_le B ds) (by omega)
+
+/-- 进位链的步数线性上界：每位至多 `2B+10` 步。
+    Linear step bound of the carry chain: at most `2B+10` steps per digit. -/
+theorem chainCost_le (B : Nat) :
+    ∀ (ds : List Nat), (∀ d ∈ ds, d < B) → chainCost B ds ≤ ds.length * (2 * B + 10)
+  | [], _ => by
+      show 0 ≤ [].length * (2 * B + 10)
+      omega
+  | d :: ds, hlt => by
+      have hd : d < B := hlt d List.mem_cons_self
+      by_cases hg : d + 1 < B
+      · have hcost : chainCost B (d :: ds) = 2 * d + 10 := by
+          simp only [chainCost, if_pos hg]
+        rw [hcost, List.length_cons]
+        calc 2 * d + 10 ≤ 2 * B + 10 := by omega
+          _ = 1 * (2 * B + 10) := (Nat.one_mul _).symm
+          _ ≤ (ds.length + 1) * (2 * B + 10) := Nat.mul_le_mul_right _ (by omega)
+      · have hd1 : d + 1 = B := by omega
+        have hcost : chainCost B (d :: ds) = (d + 4) + chainCost B ds := by
+          simp only [chainCost, if_neg hg]
+        have hlt' : ∀ e ∈ ds, e < B := fun e he => hlt e (List.mem_cons_of_mem _ he)
+        have ih := chainCost_le B ds hlt'
+        have hmid : (d + 4) + chainCost B ds
+            ≤ ds.length * (2 * B + 10) + (2 * B + 10) := by
+          have hb : d + 4 ≤ 2 * B + 10 := by omega
+          calc (d + 4) + chainCost B ds
+              ≤ (2 * B + 10) + ds.length * (2 * B + 10) := Nat.add_le_add hb ih
+            _ = ds.length * (2 * B + 10) + (2 * B + 10) := Nat.add_comm _ _
+        rw [hcost, List.length_cons]
+        calc (d + 4) + chainCost B ds
+            ≤ ds.length * (2 * B + 10) + (2 * B + 10) := hmid
+          _ = (ds.length + 1) * (2 * B + 10) :=
+              (Nat.succ_mul ds.length (2 * B + 10)).symm
+
 end DTM
 
 end Pnp
