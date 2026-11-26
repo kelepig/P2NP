@@ -104,6 +104,57 @@ theorem acceptsWithin_of_branch_obsPhase_acc (q b B T i : Nat) (M : NTM q) (w : 
   exact acceptsWithin_of_branch_hit q b B T i M w T' hB hb hl Z c hc x m hm hx hxM hxw
     hpre hpost hpadpost hpadpre hlen hHit
 
+/-- **分支族完备性（运行相位机 + 统一指数预算）**：与 `exists_branch_obsPhase_accept_of_acceptsWithin`
+    相同的完备性，但预算换成与 `SimBudget` 同一口径的 `2^((2·2^b+42)·(T+1))`——E 机逐分支跑满
+    预算时用的正是这个数。前提只需 `x.pre.length`、`Z` 不超过 `T+1`（初始区域两侧预留 `T+1` 格）。
+    Family completeness at the uniform exponential budget `2^((2·2^b+42)·(T+1))` — the budget the
+    enumerator E actually runs each branch for. Only `x.pre.length` and `Z` must fit in `T+1`. -/
+theorem exists_branch_obsPhase_accept_two_pow_of_acceptsWithin {q : Nat} (M : NTM q) {B : Nat}
+    (hB : ∀ s a, (M.step s a).length ≤ B) (hBpos : 0 < B)
+    (w : List Bool) (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T)
+    (Z : Nat) (x : Reg q) (hx : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
+    (hxacc : x.state ≠ M.accept)
+    (hpre : x.pre.length ≤ T + 1) (hZ : Z ≤ T + 1)
+    (hacc : M.AcceptsWithin w T) :
+    ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((obsPhase q b ((M.stutter).haltNorm)).run (2 ^ ((2 * 2 ^ b + 42) * (T + 1)))
+        ⟨embOb q b (obsStart q b (M.stutter) x x.state.val (seqHead B T i) Z x.state.isLt
+          (seqHead_lt_pow B t i b hBpos hbnd) (branchBlocks B t i)).state,
+         (obsStart q b (M.stutter) x x.state.val (seqHead B T i) Z x.state.isLt
+          (seqHead_lt_pow B t i b hBpos hbnd) (branchBlocks B t i)).tape⟩).state
+        = (obsPhase q b ((M.stutter).haltNorm)).accept := by
+  -- 1. 接受 ⇒ 某分支通路成功且终态接受
+  obtain ⟨t, i, r, ht1, htT, hi, hpass, hracc⟩ :=
+    exists_pass_branchBlocks_of_acceptsWithin M hB hBpos w T b hbnd hT Z x hx hxw
+      hd1 hd2 hxacc hacc
+  have htpos : 0 < t := by omega
+  -- 2. 块表非空
+  have hne : branchBlocks B t i ≠ [] := by
+    intro h
+    have hlen := branchBlocks_length B t i htpos
+    rw [h, List.length_nil] at hlen
+    omega
+  -- 3. 通路终态接受 ⇒ 观察机在 `r.steps` 内命中
+  obtain ⟨n, hn, hhit⟩ :=
+    exists_obs_acc_of_passRun_accept q b (M.stutter) (branchBlocks B t i) hne
+      Z (seqHead B T i) (seqHead_lt_pow B t i b hBpos hbnd) x x.state.val x.state.isLt
+      rfl hx.1 hx.2 (branchBlocks_hb B t i b hBpos hbnd) r hpass hracc
+  -- 4. 通路步数不超过统一指数预算（#130 的全局 `T` 版）
+  have hblen : (branchBlocks B t i).length ≤ T + 1 := by
+    rw [branchBlocks_length B t i htpos]
+    omega
+  have hsteps := passRun_steps_le_two_pow_T q b (T + 1) ((M.stutter).haltNorm).step
+    Z (seqHead B T i) (seqHead_lt_pow B t i b hBpos hbnd) x (branchBlocks B t i)
+    (branchBlocks_hb B t i b hBpos hbnd) hpre hZ hblen r hpass
+  -- 5. 命中延长到统一预算
+  have hbud : n ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) := Nat.le_trans hn hsteps
+  have hhit2 := simObs_run_accept_at_budget q b ((M.stutter).haltNorm) n
+    (2 ^ ((2 * 2 ^ b + 42) * (T + 1))) _ hbud hhit
+  -- 6. 观察机命中 ⇒ 运行相位机接受
+  exact ⟨t, i, ht1, htT, hi,
+    (obsPhase_accept_iff q b ((M.stutter).haltNorm) _ _).mpr hhit2⟩
+
 end DTM
 
 end Pnp
