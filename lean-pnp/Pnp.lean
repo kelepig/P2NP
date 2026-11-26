@@ -116,6 +116,7 @@ import Pnp.Machine.WalkRC
 import Pnp.Machine.DblRounds
 import Pnp.Machine.PowCtl
 import Pnp.Machine.ObsPhase
+import Pnp.Machine.ObsBudget
 import Pnp.Machine.MulCopy
 import Pnp.Machine.MulConsume
 import Pnp.Machine.MulRestore
