@@ -1249,6 +1249,33 @@ theorem codesRev_eq_reverse_codeCells (l : List Sym) :
       rfl
 
 
+/-- **展开成本的二次上界**：`expandCost l ≤ |l|² + 10|l| + 10`。
+    用途：E 的逐分支成本中装配段只占多项式，不破坏指数时间界。
+    Quadratic bound on the expansion cost — keeps E's per-branch cost polynomial. -/
+theorem expandCost_le (l : List Sym) :
+    expandCost l ≤ l.length * l.length + 10 * l.length + 10 := by
+  induction l with
+  | nil =>
+      simp only [expandCost, List.length_nil]
+      omega
+  | cons a l ih =>
+      cases l with
+      | nil =>
+          simp only [expandCost, List.length_cons, List.length_nil]
+          omega
+      | cons b rest =>
+          have h : expandCost (a :: b :: rest)
+              = 2 * (b :: rest).length + 9 + expandCost (b :: rest) := rfl
+          rw [h]
+          have hlen : (a :: b :: rest).length = (b :: rest).length + 1 := rfl
+          rw [hlen]
+          have hs : ((b :: rest).length + 1) * ((b :: rest).length + 1)
+              = (b :: rest).length * (b :: rest).length + 2 * (b :: rest).length + 1 := by
+            rw [Nat.succ_mul, Nat.mul_succ]
+            omega
+          rw [hs]
+          omega
+
 end DTM
 
 end Pnp

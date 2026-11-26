@@ -628,6 +628,112 @@ theorem branchMachine_dummy_iff_two_index {q : Nat} (M : NTM q) (w : List Bool) 
           (3 * branchPad M.start w Z T B b + 3 * l'.length + 1))
           (obsPhase q b ((M.stutter).haltNorm))).accept)).mp ⟨t, i, ht1, htT, hi, hPi⟩
 
+set_option maxHeartbeats 1000000 in
+/-- **推荐右垫的指数上界**：`Z ≤ T+1`、`B ≤ 2^b` ⇒
+    `branchPad ≤ 2^((2·2^b+42)·(T+1) + (b+9))`。
+    这是 E 的 `hHalt` 中「右垫大小不破坏指数时间界」的算术外壳。
+    Exponential bound on the recommended right pad — the `hHalt` arithmetic shell. -/
+theorem branchPad_le_two_pow {q : Nat} (st : Fin q) (w : List Bool) (Z T B b : Nat)
+    (hZ : Z ≤ T + 1) (hB : B ≤ 2 ^ b) :
+    branchPad st w Z T B b ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + (b + 9)) := by
+  have hpos : 1 ≤ 2 * 2 ^ b + 42 := by omega
+  have h2B : 2 * B ≤ 2 * 2 ^ b := Nat.mul_le_mul_left 2 hB
+  -- 单轮成本 ≤ `costCap (T+1) Z T (2^b)`
+  have hrc : roundCostStay (Reg.initReg st w (T + 1) 0) Z B
+        (Reg.initReg st w (T + 1) 0).cur ≤ costCap (T + 1) Z T (2 ^ b) := by
+    have h := roundCostStay_le (Reg.initReg st w (T + 1) 0) Z B
+      (Reg.initReg st w (T + 1) 0).cur
+    rw [Reg.initReg_pre_length] at h
+    unfold costCap
+    omega
+  have hcost : costCap (T + 1) Z T (2 ^ b) ≤ polyCost (2 ^ b) (T + 1) :=
+    Nat.le_trans (costCap_le_of_le (T + 1) Z T (T + 1) (2 ^ b) (Nat.le_succ T))
+      (costCap_le_poly (T + 1) Z (T + 1) (2 ^ b) (Nat.le_refl _) hZ)
+  -- 主指数 `E`
+  have hmul : T * costCap (T + 1) Z T (2 ^ b) ≤ (T + 1) * polyCost (2 ^ b) (T + 1) :=
+    Nat.le_trans (Nat.mul_le_mul_left T hcost)
+      (Nat.mul_le_mul_right (polyCost (2 ^ b) (T + 1)) (Nat.le_succ T))
+  have h1 : T * costCap (T + 1) Z T (2 ^ b) ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) :=
+    Nat.le_trans hmul (polyCost_mul_le (2 ^ b) (T + 1))
+  -- `costCap ≤ 2^E`（`polyCost ≤ (T+1)·polyCost`）
+  have hpoly_le : polyCost (2 ^ b) (T + 1) ≤ (T + 1) * polyCost (2 ^ b) (T + 1) :=
+    Nat.le_mul_of_pos_left _ (by omega : 0 < T + 1)
+  have hcap : costCap (T + 1) Z T (2 ^ b) ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) :=
+    Nat.le_trans hcost (Nat.le_trans hpoly_le (polyCost_mul_le (2 ^ b) (T + 1)))
+  -- 第二项 `2·(B+3)·(T+1) + 6 ≤ 2^(b+5+(T+1))`
+  have hcoef : 2 * (B + 3) ≤ 2 ^ (b + 3) := by
+    have h1' : 2 * (B + 3) ≤ 2 * (2 ^ b + 3) :=
+      Nat.mul_le_mul_left 2 (Nat.add_le_add_right hB 3)
+    have h2' : 2 * (2 ^ b + 3) ≤ 2 ^ (b + 3) := by
+      have hp : 2 ^ (b + 3) = 8 * 2 ^ b := by
+        rw [Nat.pow_add]
+        rw [show 2 ^ 3 = 8 from by decide]
+        exact Nat.mul_comm (2 ^ b) 8
+      have h6 : 6 ≤ 6 * 2 ^ b := by
+        have hp1 : 1 ≤ 2 ^ b := Nat.one_le_two_pow
+        omega
+      rw [hp]
+      omega
+    exact Nat.le_trans h1' h2'
+  have h2 : 2 * (B + 3) * (T + 1) + 6 ≤ 2 ^ (b + 5 + (T + 1)) := by
+    have hmul' : 2 * (B + 3) * (T + 1) ≤ 2 ^ (b + 4 + (T + 1)) := by
+      refine Nat.le_trans (Nat.mul_le_mul hcoef (self_le_two_pow (T + 1))) ?_
+      rw [← Nat.pow_add]
+      exact Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega)
+    have h6 : 6 ≤ 2 ^ (b + 4 + (T + 1)) :=
+      Nat.le_trans (by decide : 6 ≤ 2 ^ 3)
+        (Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega))
+    calc 2 * (B + 3) * (T + 1) + 6 ≤ 2 ^ (b + 4 + (T + 1)) + 2 ^ (b + 4 + (T + 1)) :=
+          Nat.add_le_add hmul' h6
+      _ = 2 * 2 ^ (b + 4 + (T + 1)) := (Nat.two_mul _).symm
+      _ = 2 ^ ((b + 4 + (T + 1)) + 1) := by
+          rw [Nat.pow_succ]; exact Nat.mul_comm 2 _
+      _ = 2 ^ (b + 5 + (T + 1)) := by
+          rw [show (b + 4 + (T + 1)) + 1 = b + 5 + (T + 1) from by omega]
+  -- 第二项指数不超过主指数
+  have hsE : b + 5 + (T + 1) ≤ (2 * 2 ^ b + 42) * (T + 1) := by
+    have hb : b + 6 ≤ 2 * 2 ^ b + 42 := by
+      have hble : b ≤ 2 ^ b := self_le_two_pow b
+      omega
+    have hT : T ≤ (2 * 2 ^ b + 42) * T := Nat.le_mul_of_pos_left T hpos
+    have hsum : (b + 6) + T ≤ (2 * 2 ^ b + 42) + (2 * 2 ^ b + 42) * T :=
+      Nat.add_le_add hb hT
+    rw [show (2 * 2 ^ b + 42) * (T + 1) = (2 * 2 ^ b + 42) + (2 * 2 ^ b + 42) * T from by
+      rw [Nat.mul_succ]; omega]
+    omega
+  have h2' : 2 * (B + 3) * (T + 1) + 6 ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) :=
+    Nat.le_trans h2 (Nat.pow_le_pow_right (by decide : 1 ≤ 2) hsE)
+  -- 逐项拼装
+  have hbb : branchBudget (T + 1) Z T B b
+      ≤ T * costCap (T + 1) Z T (2 ^ b) + (2 * (B + 3) * (T + 1) + 6) := by
+    unfold branchBudget
+    omega
+  have hBB : branchBudget (T + 1) Z T B b
+      ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) + 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) :=
+    Nat.le_trans hbb (Nat.add_le_add h1 h2')
+  have hrc' : roundCostStay (Reg.initReg st w (T + 1) 0) Z B
+        (Reg.initReg st w (T + 1) 0).cur ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) :=
+    Nat.le_trans hrc hcap
+  -- 收尾：四段之和 ≤ `2^(E+2) ≤ 2^(E+(b+9))`
+  have hE : 1 ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1)) := Nat.one_le_two_pow
+  have hsum4 : 2 ^ ((2 * 2 ^ b + 42) * (T + 1))
+        + (2 ^ ((2 * 2 ^ b + 42) * (T + 1)) + 2 ^ ((2 * 2 ^ b + 42) * (T + 1))) + 1
+      ≤ 2 ^ ((2 * 2 ^ b + 42) * (T + 1) + 2) := by
+    rw [show (2 * 2 ^ b + 42) * (T + 1) + 2
+        = ((2 * 2 ^ b + 42) * (T + 1) + 1) + 1 from by omega,
+      Nat.pow_succ, Nat.pow_succ]
+    omega
+  refine Nat.le_trans ?_ (Nat.le_trans hsum4 (Nat.pow_le_pow_right (by decide : 1 ≤ 2) (by omega)))
+  unfold branchPad
+  exact Nat.add_le_add (Nat.add_le_add hrc' hBB) (Nat.le_refl 1)
+
+/-- 右垫写串的长度：`|padStr (m-1)| = 3m`（`m ≥ 1`）。
+    Length of the written right pad, in terms of the pad size `m`. -/
+theorem padStr_len_of_pos (m : Nat) (hm : 1 ≤ m) : (padStr (m - 1)).length = 3 * m := by
+  rw [padStr_length]
+  have := Nat.sub_add_cancel hm
+  omega
+
 end DTM
 
 end Pnp
