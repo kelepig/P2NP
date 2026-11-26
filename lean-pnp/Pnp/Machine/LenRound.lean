@@ -253,6 +253,187 @@ theorem lenRound_seek_hit (ps : List (Sym × Bool)) (a : Sym) (L R : List Sym)
   rw [lenRound_scan_to_true ps a L R hps]
   rw [lenRound_switch (some false) _ R]
 
+/-! ### cnt 半段：组合机版的计数器相位（状态 5/6/7/8） -/
+
+/-- 状态 5 读非空白：左移一格。
+    State 5 on a non-blank moves left. -/
+theorem lenRound_step5_move (x : Sym) (L' : List Sym) (a : Sym) (R : List Sym)
+    (ha : a ≠ none) :
+    lenRound.run 1 ⟨(⟨5, by omega⟩ : Fin 11), Tape.mk (x :: L') (a :: R)⟩
+      = ⟨(⟨5, by omega⟩ : Fin 11), Tape.mk L' (x :: a :: R)⟩ := by
+  rcases ha' : a with _ | b
+  · exact absurd ha' ha
+  rw [estepLR 5 (by omega) (some b) (⟨5, by omega⟩ : Fin 11) (some b) Dir.left
+    (by rfl) _ _ (by omega)]
+  etape
+
+/-- 状态 5 读空白：跨分隔进状态 6。
+    State 5 on a blank crosses the separator into state 6. -/
+theorem lenRound_step5_blank (x : Sym) (L' : List Sym) (R : List Sym) :
+    lenRound.run 1 ⟨(⟨5, by omega⟩ : Fin 11), Tape.mk (x :: L') (none :: R)⟩
+      = ⟨(⟨6, by omega⟩ : Fin 11), Tape.mk L' (x :: none :: R)⟩ := by
+  rw [estepLR 5 (by omega) none (⟨6, by omega⟩ : Fin 11) none Dir.left
+    (by rfl) _ _ (by omega)]
+  etape
+
+/-- **组合机越过格块到分隔空白**：`|Lb|+1` 步，状态仍在 5。
+    Crossing the block up to the separator, `|Lb|+1` steps, still in state 5. -/
+theorem lenRound_walkBlock : ∀ (Lb : List Sym) (k : Nat) (F : List Sym) (a : Sym)
+    (R : List Sym), (∀ x ∈ Lb, x ≠ none) → a ≠ none →
+    lenRound.run (Lb.length + 1)
+      ⟨(⟨5, by omega⟩ : Fin 11),
+        Tape.mk (Lb ++ none :: List.replicate k (some true) ++ none :: F) (a :: R)⟩
+      = ⟨(⟨5, by omega⟩ : Fin 11),
+          Tape.mk (List.replicate k (some true) ++ none :: F) (none :: Lb.reverse ++ a :: R)⟩
+  | [], k, F, a, R, _, ha => by
+      rw [show ([].length + 1 : Nat) = 1 from rfl]
+      simp only [List.nil_append, List.cons_append]
+      rw [lenRound_step5_move none (List.replicate k (some true) ++ none :: F) a R ha]
+      simp
+  | x :: xs, k, F, a, R, hLb, ha => by
+      have hx : x ≠ none := hLb x (by simp)
+      rw [show (x :: xs).length + 1 = 1 + (xs.length + 1) from by
+        rw [List.length_cons]; omega]
+      rw [DTM.run_add lenRound 1 (xs.length + 1)]
+      simp only [List.cons_append]
+      rw [lenRound_step5_move x
+        (xs ++ none :: List.replicate k (some true) ++ none :: F) a R ha]
+      rw [lenRound_walkBlock xs k F x (a :: R)
+        (by intro y hy; exact hLb y (by simp [hy])) hx]
+      rw [List.reverse_cons]
+      simp [List.append_assoc]
+
+/-- **组合机进入计数器（`k ≥ 1`）**：状态 5 → 6，一步。
+    Entering a nonempty counter: one step from state 5 to 6. -/
+theorem lenRound_enterCounter (k : Nat) (F P : List Sym) (hk : 1 ≤ k) :
+    lenRound.run 1
+      ⟨(⟨5, by omega⟩ : Fin 11),
+        Tape.mk (List.replicate k (some true) ++ none :: F) (none :: P)⟩
+      = ⟨(⟨6, by omega⟩ : Fin 11),
+          Tape.mk (List.replicate (k - 1) (some true) ++ none :: F) (some true :: none :: P)⟩ := by
+  have hrep : List.replicate k (some true)
+      = some true :: List.replicate (k - 1) (some true) := by
+    match k with
+    | 0 => omega
+    | _ + 1 => rfl
+  rw [hrep]
+  simp only [List.cons_append]
+  rw [lenRound_step5_blank]
+
+/-- **组合机越过格块（`k ≥ 1`）**：`|Lb|+2` 步，落在计数器最近的 `some true` 上（状态 6）。
+    Crossing the block and separator with a nonempty counter, `|Lb|+2` steps. -/
+theorem lenRound_walkBlock_pos (Lb : List Sym) (k : Nat) (F : List Sym) (a : Sym)
+    (R : List Sym) (hk : 1 ≤ k) (hLb : ∀ x ∈ Lb, x ≠ none) (ha : a ≠ none) :
+    lenRound.run (Lb.length + 2)
+      ⟨(⟨5, by omega⟩ : Fin 11),
+        Tape.mk (Lb ++ none :: List.replicate k (some true) ++ none :: F) (a :: R)⟩
+      = ⟨(⟨6, by omega⟩ : Fin 11),
+          Tape.mk (List.replicate (k - 1) (some true) ++ none :: F)
+            (some true :: none :: Lb.reverse ++ a :: R)⟩ := by
+  rw [show Lb.length + 2 = (Lb.length + 1) + 1 from by omega]
+  rw [DTM.run_add lenRound (Lb.length + 1) 1]
+  rw [lenRound_walkBlock Lb k F a R hLb ha]
+  simp only [List.cons_append]
+  rw [lenRound_enterCounter k F (Lb.reverse ++ a :: R) hk]
+
+/-- **组合机越过格块（`k = 0`）**：`|Lb|+2` 步，跨过分隔与前沿空白（状态 6）。
+    Crossing the block and separator with an empty counter, `|Lb|+2` steps. -/
+theorem lenRound_walkBlock_zero : ∀ (Lb : List Sym) (F : List Sym) (a : Sym)
+    (R : List Sym), (∀ x ∈ Lb, x ≠ none) → a ≠ none →
+    lenRound.run (Lb.length + 2)
+      ⟨(⟨5, by omega⟩ : Fin 11), Tape.mk (Lb ++ none :: none :: F) (a :: R)⟩
+      = ⟨(⟨6, by omega⟩ : Fin 11),
+          Tape.mk F (none :: none :: Lb.reverse ++ a :: R)⟩
+  | [], F, a, R, _, ha => by
+      rw [show ([].length + 2 : Nat) = 1 + 1 from rfl, DTM.run_add lenRound 1 1]
+      simp only [List.nil_append]
+      rw [lenRound_step5_move none (none :: F) a R ha]
+      simp only [List.cons_append]
+      rw [lenRound_step5_blank none F (a :: R)]
+      simp
+  | x :: xs, F, a, R, hLb, ha => by
+      have hx : x ≠ none := hLb x (by simp)
+      rw [show (x :: xs).length + 2 = 1 + (xs.length + 2) from by
+        rw [List.length_cons]; omega]
+      rw [DTM.run_add lenRound 1 (xs.length + 2)]
+      simp only [List.cons_append]
+      rw [lenRound_step5_move x (xs ++ none :: none :: F) a R ha]
+      rw [lenRound_walkBlock_zero xs F x (a :: R)
+        (by intro y hy; exact hLb y (by simp [hy])) hx]
+      rw [List.reverse_cons]
+      simp [List.append_assoc]
+
+/-- **组合机越过计数器并写一个 `true`**：状态 6 → 7，`j+2` 步。
+    Walking over the counter and writing one `true`: state 6 → 7 in `j+2` steps. -/
+theorem lenRound_skipCounter (j : Nat) (F M : List Sym) :
+    lenRound.run (j + 2)
+      ⟨(⟨6, by omega⟩ : Fin 11),
+        Tape.mk (List.replicate j (some true) ++ none :: F) (some true :: M)⟩
+      = ⟨(⟨7, by omega⟩ : Fin 11),
+          Tape.mk F (List.replicate (j + 2) (some true) ++ M)⟩ := by
+  induction j generalizing F M with
+  | zero =>
+      rw [show (List.replicate 0 (some true) ++ none :: F) = none :: F from rfl]
+      rw [show (0 + 2 : Nat) = 1 + 1 from rfl, DTM.run_add lenRound 1 1]
+      rw [estepLR 6 (by omega) (some true) (⟨6, by omega⟩ : Fin 11) (some true) Dir.left
+        (by rfl) _ _ (by omega)]
+      etape
+      rw [estepLR 6 (by omega) none (⟨7, by omega⟩ : Fin 11) (some true) Dir.stay
+        (by rfl) _ _ (by omega)]
+      etape
+      simp
+  | succ j ih =>
+      rw [show List.replicate (j + 1) (some true) ++ none :: F
+          = some true :: (List.replicate j (some true) ++ none :: F) from rfl]
+      rw [show (j + 1 + 2 : Nat) = 1 + (j + 2) from by omega]
+      rw [DTM.run_add lenRound 1 (j + 2)]
+      rw [estepLR 6 (by omega) (some true) (⟨6, by omega⟩ : Fin 11) (some true) Dir.left
+        (by rfl) _ _ (by omega)]
+      etape
+      rw [ih F (some true :: M)]
+      rw [show 1 + (j + 2) = (j + 2) + 1 from by omega]
+      rw [rep_cons_merge (j + 2) (some true) M]
+
+/-- **组合机在空计数器上写第一个 `true`**：状态 6 → 7，一步。
+    Writing the first `true` on an empty counter: one step, state 6 → 7. -/
+theorem lenRound_write0 (F M : List Sym) :
+    lenRound.run 1 ⟨(⟨6, by omega⟩ : Fin 11), Tape.mk F (none :: M)⟩
+      = ⟨(⟨7, by omega⟩ : Fin 11), Tape.mk F (some true :: M)⟩ := by
+  rw [estepLR 6 (by omega) none (⟨7, by omega⟩ : Fin 11) (some true) Dir.stay
+    (by rfl) _ _ (by omega)]
+  etape
+
+/-- **组合机右行越回并跨分隔**：状态 7 → 8，`m+1` 步。
+    Walking right over the counter and crossing the separator: state 7 → 8 in `m+1` steps. -/
+theorem lenRound_skipTrue (m : Nat) (L F : List Sym) :
+    lenRound.run (m + 1)
+      ⟨(⟨7, by omega⟩ : Fin 11),
+        Tape.mk L (List.replicate m (some true) ++ none :: F)⟩
+      = ⟨(⟨8, by omega⟩ : Fin 11),
+          Tape.mk (none :: List.replicate m (some true) ++ L) F⟩ := by
+  induction m generalizing L F with
+  | zero =>
+      rw [show List.replicate 0 (some true) ++ none :: F = none :: F from rfl]
+      rw [show (0 + 1 : Nat) = 1 from rfl]
+      rw [estepLR 7 (by omega) none (⟨8, by omega⟩ : Fin 11) none Dir.right
+        (by rfl) _ _ (by omega)]
+      etape
+      simp
+  | succ m ih =>
+      rw [show List.replicate (m + 1) (some true) ++ none :: F
+          = some true :: (List.replicate m (some true) ++ none :: F) from rfl]
+      rw [show (m + 1 + 1 : Nat) = 1 + (m + 1) from by omega]
+      rw [DTM.run_add lenRound 1 (m + 1)]
+      rw [estepLR 7 (by omega) (some true) (⟨7, by omega⟩ : Fin 11) (some true) Dir.right
+        (by rfl) _ _ (by omega)]
+      etape
+      rw [ih (some true :: L) F]
+      rw [show List.replicate (m + 1) (some true)
+          = some true :: List.replicate m (some true) from rfl]
+      simp only [List.cons_append]
+      rw [← rep_cons_swap m (some true) L]
+      simp only [List.cons_append]
+
 end DTM
 
 end Pnp
