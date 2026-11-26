@@ -98,6 +98,7 @@ import Pnp.Machine.Go
 import Pnp.Machine.CopyBlock
 import Pnp.Machine.WriteBack
 import Pnp.Machine.RegionAlgebra
+import Pnp.Machine.ExpandEnc
 import Pnp.Machine.EnumAssembly
 import Pnp.Machine.SimBudget
 import Pnp.Machine.ZeroCheck
