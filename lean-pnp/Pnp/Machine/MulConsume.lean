@@ -31,7 +31,7 @@ namespace Pnp
 namespace DTM
 
 /-- 消费相位机（6 状态，5 为停机态）。 The consume-phase machine. -/
-def mulConsume : DTM 7 where
+def mulConsume : DTM 6 where
   step := fun s a =>
     match s.val with
     | 0 => (match a with
@@ -50,26 +50,26 @@ def mulConsume : DTM 7 where
        | _ => (⟨5, by omega⟩, a, Dir.stay))
     | _ => (s, a, Dir.stay)
   start := 0
-  accept := 6
-  reject := 6
+  accept := 5
+  reject := 5
 
 /-- 非 5 状态一律不停机。 States other than 5 never halt. -/
-theorem mulConsume_halted_ne (st : Nat) (hst : st < 7) (h : st ≠ 6) (t : Tape) :
+theorem mulConsume_halted_ne (st : Nat) (hst : st < 6) (h : st ≠ 5) (t : Tape) :
     mulConsume.halted ⟨⟨st, hst⟩, t⟩ = false := by
   rw [DTM.halted, Bool.or_eq_false_iff]
   refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulConsume.accept.val = 6 from rfl] at hv
+    rw [show mulConsume.accept.val = 5 from rfl] at hv
     exact h hv
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulConsume.reject.val = 6 from rfl] at hv
+    rw [show mulConsume.reject.val = 5 from rfl] at hv
     exact h hv
 
 /-- `mulConsume` 的单步运行套路。 The one-step idiom for `mulConsume`. -/
-theorem estepMCn (st : Nat) (hst : st < 7) (a : Sym) (q' : Fin 7) (s : Sym) (d : Dir)
-    (h : mulConsume.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 6) :
+theorem estepMCn (st : Nat) (hst : st < 6) (a : Sym) (q' : Fin 6) (s : Sym) (d : Dir)
+    (h : mulConsume.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 5) :
     mulConsume.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
       = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
   rw [show (1 : Nat) = 0 + 1 from rfl]
@@ -80,9 +80,9 @@ theorem estepMCn (st : Nat) (hst : st < 7) (a : Sym) (q' : Fin 7) (s : Sym) (d :
     State 1 skips `m` trues leftwards and stays on the last one. -/
 theorem mulConsume_skipLeft : ∀ (m : Nat) (P R : List Sym),
     mulConsume.run m
-      ⟨(⟨1, by omega⟩ : Fin 7),
+      ⟨(⟨1, by omega⟩ : Fin 6),
         Tape.mk (List.replicate m (some true) ++ P) (some true :: R)⟩
-      = ⟨(⟨1, by omega⟩ : Fin 7),
+      = ⟨(⟨1, by omega⟩ : Fin 6),
           Tape.mk P (List.replicate m (some true) ++ (some true :: R))⟩
   | 0, P, R => by
       simp [DTM.run]
@@ -103,11 +103,11 @@ theorem mulConsume_skipLeft : ∀ (m : Nat) (P R : List Sym),
     write `some false` and move right, in `m + 3` steps. -/
 theorem mulConsume_toFlip : ∀ (m r : Nat) (L R : List Sym),
     mulConsume.run (m + 3)
-      ⟨(⟨1, by omega⟩ : Fin 7),
+      ⟨(⟨1, by omega⟩ : Fin 6),
         Tape.mk (List.replicate m (some true) ++
             (List.replicate r (some false) ++ (none :: (none :: L))))
           (some true :: R)⟩
-      = ⟨(⟨3, by omega⟩ : Fin 7),
+      = ⟨(⟨3, by omega⟩ : Fin 6),
           Tape.mk (some false ::
               (List.replicate r (some false) ++ (none :: (none :: L))))
             (List.replicate m (some true) ++ R)⟩
@@ -148,9 +148,9 @@ theorem mulConsume_toFlip : ∀ (m r : Nat) (L R : List Sym),
     State 3 walks right over B's `m` trues and crosses `sepB`. -/
 theorem mulConsume_skipR : ∀ (m : Nat) (P R : List Sym),
     mulConsume.run (m + 1)
-      ⟨(⟨3, by omega⟩ : Fin 7),
+      ⟨(⟨3, by omega⟩ : Fin 6),
         Tape.mk P (List.replicate m (some true) ++ (none :: R))⟩
-      = ⟨(⟨4, by omega⟩ : Fin 7),
+      = ⟨(⟨4, by omega⟩ : Fin 6),
           Tape.mk (none :: (List.replicate m (some true) ++ P)) R⟩
   | 0, P, R => by
       simp only [List.replicate_zero, List.nil_append]
@@ -171,9 +171,9 @@ theorem mulConsume_skipR : ∀ (m : Nat) (P R : List Sym),
     State 4 walks right through A's `m` falses and halts on `sepA`. -/
 theorem mulConsume_skipA : ∀ (m : Nat) (P R : List Sym),
     mulConsume.run (m + 1)
-      ⟨(⟨4, by omega⟩ : Fin 7),
+      ⟨(⟨4, by omega⟩ : Fin 6),
         Tape.mk P (List.replicate m (some false) ++ (none :: R))⟩
-      = ⟨(⟨5, by omega⟩ : Fin 7),
+      = ⟨(⟨5, by omega⟩ : Fin 6),
           Tape.mk (List.replicate m (some false) ++ P) (none :: R)⟩
   | 0, P, R => by
       simp only [List.replicate_zero, List.nil_append]
@@ -194,11 +194,11 @@ theorem mulConsume_skipA : ∀ (m : Nat) (P R : List Sym),
     Consume one cell of `B` and halt on `sepA`, in `a + 2u + 4` steps; `u ↦ u-1`. -/
 theorem mulConsume_run (a u r : Nat) (h : 1 ≤ u) (L M : List Sym) :
     mulConsume.run (a + 2 * u + 4)
-      ⟨(⟨0, by omega⟩ : Fin 7),
+      ⟨(⟨0, by omega⟩ : Fin 6),
         Tape.mk (List.replicate u (some true) ++
             (List.replicate r (some false) ++ (none :: (none :: L))))
           (none :: (List.replicate a (some false) ++ (none :: M)))⟩
-      = ⟨(⟨5, by omega⟩ : Fin 7),
+      = ⟨(⟨5, by omega⟩ : Fin 6),
           Tape.mk (List.replicate a (some false) ++
               (none :: (List.replicate (u - 1) (some true) ++
                 (List.replicate (r + 1) (some false) ++ (none :: (none :: L))))))

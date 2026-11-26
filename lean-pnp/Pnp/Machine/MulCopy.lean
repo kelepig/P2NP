@@ -49,26 +49,26 @@ def mulCopy : DTM 8 where
        | none => (⟨6, by omega⟩, none, Dir.stay))
     | _ => (s, a, Dir.stay)
   start := 0
-  accept := 7
-  reject := 7
+  accept := 6
+  reject := 6
 
 /-- 非 6 状态一律不停机。 States other than 6 never halt. -/
-theorem mulCopy_halted_ne (st : Nat) (hst : st < 8) (h : st ≠ 7) (t : Tape) :
+theorem mulCopy_halted_ne (st : Nat) (hst : st < 8) (h : st ≠ 6) (t : Tape) :
     mulCopy.halted ⟨⟨st, hst⟩, t⟩ = false := by
   rw [DTM.halted, Bool.or_eq_false_iff]
   refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulCopy.accept.val = 7 from rfl] at hv
+    rw [show mulCopy.accept.val = 6 from rfl] at hv
     exact h hv
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulCopy.reject.val = 7 from rfl] at hv
+    rw [show mulCopy.reject.val = 6 from rfl] at hv
     exact h hv
 
 /-- `mulCopy` 的单步运行套路。 The one-step idiom for `mulCopy`. -/
 theorem estepMC (st : Nat) (hst : st < 8) (a : Sym) (q' : Fin 8) (s : Sym) (d : Dir)
-    (h : mulCopy.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 7) :
+    (h : mulCopy.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 6) :
     mulCopy.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
       = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
   rw [show (1 : Nat) = 0 + 1 from rfl]
@@ -311,7 +311,7 @@ theorem mulCopy_first (a b r w : Nat) (ha : 2 ≤ a) (hw : 1 ≤ w) (L R : List 
   -- 2 步：左移一格回到下一个源格，再读它进状态 0
   rw [show (2 : Nat) = 1 + 1 from rfl, DTM.run_add mulCopy 1 1]
   rw [estepMC 5 (by omega) (some false) _ _ _ (by rfl) _ _
-        (by omega : (5 : Nat) ≠ 7)]
+        (by omega : (5 : Nat) ≠ 6)]
   etape
   rw [estepMC 5 (by omega) (some true) _ _ _ (by rfl) _ _ (by omega)]
   etape
@@ -398,7 +398,7 @@ theorem mulCopy_unit (a b r w d i : Nat) (hi : i + 2 ≤ a) (hd : 1 ≤ d) (hw :
           (some false :: (List.replicate w (none : Sym) ++ R))) from by
     rw [hd1, List.cons_append]]
   rw [estepMC 4 (by omega) (some false) _ _ _ (by rfl) _ _
-        (by omega : (4 : Nat) ≠ 7)]
+        (by omega : (4 : Nat) ≠ 6)]
   etape
   rw [show List.replicate i (some false) ++
         (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))
@@ -507,7 +507,7 @@ theorem mulCopy_last (a b r w d i : Nat) (hi : i + 1 = a) (hd : 1 ≤ d)
           (some false :: (List.replicate w (none : Sym) ++ R))) from by
     rw [hd1, List.cons_append]]
   rw [estepMC 4 (by omega) (some false) _ _ _ (by rfl) _ _
-        (by omega : (4 : Nat) ≠ 7)]
+        (by omega : (4 : Nat) ≠ 6)]
   etape
   rw [show List.replicate i (some false) ++
         (some false :: (List.replicate (a - 1 - i) (some true) ++ mulB b r L))
@@ -611,7 +611,7 @@ theorem mulCopy_last0 (b r w : Nat) (hw : 1 ≤ w) (L R : List Sym) :
   -- 2 步：左移一格到 `sepB`，再读它停机（状态 6）
   rw [show (2 : Nat) = 1 + 1 from rfl, DTM.run_add mulCopy 1 1]
   rw [estepMC 5 (by omega) (some false) _ _ _ (by rfl) _ _
-        (by omega : (5 : Nat) ≠ 7)]
+        (by omega : (5 : Nat) ≠ 6)]
   etape
   rw [estepMC 5 (by omega) none _ _ _ (by rfl) _ _ (by omega)]
   etape

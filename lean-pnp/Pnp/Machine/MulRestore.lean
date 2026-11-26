@@ -24,7 +24,7 @@ namespace Pnp
 namespace DTM
 
 /-- 恢复相位机（4 状态，3 为停机态）。 The restore-phase machine. -/
-def mulRestore : DTM 5 where
+def mulRestore : DTM 4 where
   step := fun s a =>
     match s.val with
     | 0 => (match a with
@@ -40,26 +40,26 @@ def mulRestore : DTM 5 where
        | some false => (⟨3, by omega⟩, some false, Dir.stay))
     | _ => (s, a, Dir.stay)
   start := 0
-  accept := 4
-  reject := 4
+  accept := 3
+  reject := 3
 
 /-- 非 3 状态一律不停机。 States other than 3 never halt. -/
-theorem mulRestore_halted_ne (st : Nat) (hst : st < 5) (h : st ≠ 4) (t : Tape) :
+theorem mulRestore_halted_ne (st : Nat) (hst : st < 4) (h : st ≠ 3) (t : Tape) :
     mulRestore.halted ⟨⟨st, hst⟩, t⟩ = false := by
   rw [DTM.halted, Bool.or_eq_false_iff]
   refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulRestore.accept.val = 4 from rfl] at hv
+    rw [show mulRestore.accept.val = 3 from rfl] at hv
     exact h hv
   · intro hh
     have hv := congrArg Fin.val hh
-    rw [show mulRestore.reject.val = 4 from rfl] at hv
+    rw [show mulRestore.reject.val = 3 from rfl] at hv
     exact h hv
 
 /-- `mulRestore` 的单步运行套路。 The one-step idiom for `mulRestore`. -/
-theorem estepMR (st : Nat) (hst : st < 5) (a : Sym) (q' : Fin 5) (s : Sym) (d : Dir)
-    (h : mulRestore.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 4) :
+theorem estepMR (st : Nat) (hst : st < 4) (a : Sym) (q' : Fin 4) (s : Sym) (d : Dir)
+    (h : mulRestore.step ⟨st, hst⟩ a = (q', s, d)) (M R : List Sym) (hne : st ≠ 3) :
     mulRestore.run 1 ⟨⟨st, hst⟩, Tape.mk M (a :: R)⟩
       = ⟨q', (Tape.mk M (a :: R)).write s |>.move d⟩ := by
   rw [show (1 : Nat) = 0 + 1 from rfl]
@@ -70,9 +70,9 @@ theorem estepMR (st : Nat) (hst : st < 5) (a : Sym) (q' : Fin 5) (s : Sym) (d : 
     State 1 walks left flipping `m` falses back to trues. -/
 theorem mulRestore_flip : ∀ (m : Nat) (P R : List Sym),
     mulRestore.run m
-      ⟨(⟨1, by omega⟩ : Fin 5),
+      ⟨(⟨1, by omega⟩ : Fin 4),
         Tape.mk (List.replicate m (some false) ++ P) (some false :: R)⟩
-      = ⟨(⟨1, by omega⟩ : Fin 5),
+      = ⟨(⟨1, by omega⟩ : Fin 4),
           Tape.mk P (some false :: (List.replicate m (some true) ++ R))⟩
   | 0, P, R => by
       simp [DTM.run]
@@ -93,10 +93,10 @@ theorem mulRestore_flip : ∀ (m : Nat) (P R : List Sym),
     on reading `sepA`, steps back onto A's rightmost cell, in `m' + 2` steps. -/
 theorem mulRestore_skipT : ∀ (m m' : Nat) (P Q : List Sym),
     mulRestore.run (m' + 2)
-      ⟨(⟨2, by omega⟩ : Fin 5),
+      ⟨(⟨2, by omega⟩ : Fin 4),
         Tape.mk (List.replicate m (some true) ++ (none :: P))
           (some true :: (List.replicate m' (some true) ++ (none :: Q)))⟩
-      = ⟨(⟨3, by omega⟩ : Fin 5),
+      = ⟨(⟨3, by omega⟩ : Fin 4),
           Tape.mk (List.replicate (m + m') (some true) ++ (none :: P))
             (some true :: (none :: Q))⟩
   | m, 0, P, Q => by
@@ -126,9 +126,9 @@ theorem mulRestore_skipT : ∀ (m m' : Nat) (P Q : List Sym),
     Restore A and return to the start, in `2a + 3` steps; the head ends on A's rightmost cell. -/
 theorem mulRestore_run (a : Nat) (h : 1 ≤ a) (P Q : List Sym) :
     mulRestore.run (2 * a + 3)
-      ⟨(⟨0, by omega⟩ : Fin 5),
+      ⟨(⟨0, by omega⟩ : Fin 4),
         Tape.mk (List.replicate a (some false) ++ (none :: P)) (none :: Q)⟩
-      = ⟨(⟨3, by omega⟩ : Fin 5),
+      = ⟨(⟨3, by omega⟩ : Fin 4),
           Tape.mk (List.replicate (a - 1) (some true) ++ (none :: P))
             (some true :: (none :: Q))⟩ := by
   rcases a with _ | a'
