@@ -119,6 +119,95 @@ theorem skipNonBlankL_run : ∀ (xs : List Sym), (∀ x ∈ xs, x ≠ none) →
       rw [List.reverse_cons, List.append_assoc]
       rfl
 
+/-! ### 右向跳过非空白 -/
+
+/-- **右向跳过非空白**：右移越过所有非空白格，停在第一个空白格上并接受。
+    数字区组循环中用于「从刚写出的块向右穿过旧段，走到下一段」。
+    Skips non-blank cells to the right; halts on the first blank. -/
+def skipNonBlankR : DTM 2 where
+  step := fun s a =>
+    if s.val = 0 then
+      if a = none then ((1 : Fin 2), a, Dir.stay)
+      else ((0 : Fin 2), a, Dir.right)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 1
+  reject := 1
+
+/-- 起始态处的格局不停机。 A start-state configuration never halts. -/
+theorem skipNonBlankR_halted_start (L R : List Sym) :
+    skipNonBlankR.halted ⟨(0 : Fin 2), Tape.mk L R⟩ = false := by
+  show (((0 : Fin 2) == (⟨1, by omega⟩ : Fin 2))
+      || ((0 : Fin 2) == (⟨1, by omega⟩ : Fin 2))) = false
+  decide
+
+/-- 非终止状态（≠ 1）不停机。 States other than 1 never halt. -/
+theorem skipNonBlankR_halted_ne (st : Nat) (hst : st < 2) (h1 : st ≠ 1) (t : Tape) :
+    skipNonBlankR.halted ⟨⟨st, hst⟩, t⟩ = false := by
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  refine ⟨beq_eq_false_iff_ne.mpr ?_, beq_eq_false_iff_ne.mpr ?_⟩
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show skipNonBlankR.accept.val = 1 from rfl] at hv
+    exact h1 hv
+  · intro hh
+    have hv := congrArg Fin.val hh
+    rw [show skipNonBlankR.reject.val = 1 from rfl] at hv
+    exact h1 hv
+
+/-- 读到空白：停在原地并接受。 On a blank: stay and accept. -/
+theorem skipNonBlankR_step_blank (L R : List Sym) :
+    skipNonBlankR.stepConfig ⟨(0 : Fin 2), Tape.mk L (none :: R)⟩ =
+      ⟨(1 : Fin 2), Tape.mk L (none :: R)⟩ :=
+  stepConfig_of_lit skipNonBlankR (0 : Fin 2) none L R (1 : Fin 2) none Dir.stay
+    (Tape.mk L (none :: R))
+    (by
+      simp only [skipNonBlankR]
+      rw [if_pos (show (0 : Fin 2).val = 0 from rfl)]
+      rfl)
+    (by rfl)
+
+/-- 读到非空白：右移一格。 On a non-blank: move right. -/
+theorem skipNonBlankR_step_right (L : List Sym) (a : Sym) (R : List Sym) (ha : a ≠ none) :
+    skipNonBlankR.stepConfig ⟨(0 : Fin 2), Tape.mk L (a :: R)⟩ =
+      ⟨(0 : Fin 2), Tape.mk (a :: L) R⟩ :=
+  stepConfig_of_lit skipNonBlankR (0 : Fin 2) a L R (0 : Fin 2) a Dir.right
+    (Tape.mk (a :: L) R)
+    (by
+      simp only [skipNonBlankR]
+      rw [if_pos (show (0 : Fin 2).val = 0 from rfl)]
+      rw [if_neg ha])
+    (by rfl)
+
+/-- **整段运行**：右带 `xs`（全非空白）后接一个空白，`|xs| + 1` 步后头停在那个空白上。
+    Full run: over `xs` (all non-blank) onto the blank behind them. -/
+theorem skipNonBlankR_run : ∀ (xs : List Sym), (∀ x ∈ xs, x ≠ none) →
+    ∀ (L R : List Sym),
+      skipNonBlankR.run (xs.length + 1)
+          ⟨(0 : Fin 2), Tape.mk L (xs ++ none :: R)⟩ =
+        ⟨(1 : Fin 2), Tape.mk (xs.reverse ++ L) (none :: R)⟩
+  | [], _, L, R => by
+      show skipNonBlankR.run (0 + 1)
+          ⟨(0 : Fin 2), Tape.mk L ([] ++ none :: R)⟩ = _
+      rw [List.nil_append]
+      rw [run_one_stp _ _ (skipNonBlankR_halted_start L (none :: R))]
+      rw [skipNonBlankR_step_blank L R]
+      rfl
+  | x :: xs, hx, L, R => by
+      have hxs : ∀ y ∈ xs, y ≠ none := fun y hy => hx y (List.mem_cons_of_mem x hy)
+      have hxne : x ≠ none := hx x List.mem_cons_self
+      show skipNonBlankR.run ((x :: xs).length + 1)
+          ⟨(0 : Fin 2), Tape.mk L ((x :: xs) ++ none :: R)⟩ = _
+      rw [List.cons_append]
+      rw [List.length_cons]
+      rw [show xs.length + 1 + 1 = (xs.length + 1) + 1 from rfl]
+      rw [DTM.run_succ_of_not_halted skipNonBlankR (xs.length + 1) _
+        (skipNonBlankR_halted_start L (x :: (xs ++ none :: R)))]
+      rw [skipNonBlankR_step_right L x (xs ++ none :: R) hxne]
+      rw [skipNonBlankR_run xs hxs (x :: L) R]
+      rw [List.reverse_cons, List.append_assoc]
+      rfl
+
 /-! ### 左向跳过空白 -/
 
 /-- **左向跳过空白**：左移越过所有空白格，停在第一个非空白格上并接受。
