@@ -15,6 +15,7 @@
 -/
 
 import Pnp.Machine.DigitShape
+import Pnp.Machine.DigitRound
 import Pnp.Machine.WalkLT
 import Pnp.Machine.Go
 
@@ -2740,6 +2741,62 @@ theorem groupIterE_run (B : Nat) :
               ++ (List.replicate (k₀ + 2) (some true)
                 ++ (some false :: L.drop (k₀ + 2)))) from rfl]
 
+
+
+
+/-- 删掉所有空白格（E 侧数字区与规范数字区的比较用）。 -/
+def delNone : List Sym → List Sym
+  | [] => []
+  | none :: t => delNone t
+  | some b :: t => some b :: delNone t
+
+/-- 删空白：`n` 个空白被吃掉。 -/
+theorem delNone_replicate_none : ∀ (n : Nat) (X : List Sym),
+    delNone (List.replicate n none ++ X) = delNone X
+  | 0, X => rfl
+  | n + 1, X => by
+      rw [List.replicate_succ, List.cons_append]
+      show delNone (List.replicate n none ++ X) = delNone X
+      exact delNone_replicate_none n X
+
+/-- 删空白：真格串原样保留。 -/
+theorem delNone_replicate_true : ∀ (n : Nat) (X : List Sym),
+    delNone (List.replicate n (some true) ++ X)
+      = List.replicate n (some true) ++ delNone X
+  | 0, X => rfl
+  | n + 1, X => by
+      rw [List.replicate_succ, List.cons_append]
+      show some true :: delNone (List.replicate n (some true) ++ X)
+        = List.replicate (n + 1) (some true) ++ delNone X
+      rw [delNone_replicate_true n X]
+      rw [List.replicate_succ, List.cons_append]
+
+/-- **E 侧数字区**（块间以空白分隔）：数字 `d` 的块写成 `空白^(d+1) ++ 真格^(d+2) ++ 0`。
+    E-side digit area: blocks separated by blanks. -/
+def areaLE : List Nat → List Sym
+  | [] => []
+  | d :: ds => List.replicate (d + 1) none
+      ++ (List.replicate (d + 2) (some true) ++ (some false :: areaLE ds))
+
+/-- **删空白后与 `areaL` 一致**：块间的空白只是分隔符，符号序列（忽略空白）就是
+    `DigitRound.areaL` 的块码逆序拼接。
+    Removing the separators recovers the canonical `areaL` sequence. -/
+theorem delNone_areaLE (ks : List Nat) : delNone (areaLE ks) = areaL ks := by
+  induction ks with
+  | nil => rfl
+  | cons d ds ih =>
+      show delNone (List.replicate (d + 1) none
+        ++ (List.replicate (d + 2) (some true) ++ (some false :: areaLE ds))) = areaL (d :: ds)
+      rw [delNone_replicate_none, delNone_replicate_true]
+      rw [show delNone (some false :: areaLE ds) = some false :: delNone (areaLE ds) from rfl]
+      rw [ih, areaL_cons]
+      rw [blockCode]
+      rw [show (some false :: List.replicate (d + 2) (some true)).reverse
+          = List.replicate (d + 2) (some true) ++ [some false] from by
+        rw [List.reverse_cons, List.reverse_replicate]]
+      rw [show List.replicate (d + 2) (some true) ++ [some false] ++ areaL ds
+          = List.replicate (d + 2) (some true) ++ (some false :: areaL ds) from by
+        rw [List.append_assoc, List.singleton_append]]
 
 
 /-! ### 数字区组循环的一轮（纸带级） -/
