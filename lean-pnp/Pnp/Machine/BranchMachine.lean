@@ -260,16 +260,16 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
     (l' : List Sym) (hw : w.map some = a :: l') (hl : ∀ v ∈ a :: l', v ≠ none)
     {B : Nat} (hBpos : 0 < B)
     (hlB : ∀ m a', ((M.stutter).step m a').length ≤ B + 1)
-    (T b t i : Nat) (hT : 0 < T) (hbnd : B + 2 < 2 ^ b)
+    (T b t i : Nat) (hT : 0 < T) (ht1 : 1 ≤ t) (htT : t ≤ T) (hbnd : B + 2 < 2 ^ b)
     (Z m : Nat) (hm : 1 ≤ m) (hZT : Z ≤ T + 1) (R : List Sym)
     (hd1 : T ≤ m)
     (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
     (hxacc : M.start ≠ M.accept) (hxre : M.start ≠ M.reject)
-    (hpadpost : (branchBlocks B T i).length + 1
+    (hpadpost : (branchBlocks B t i).length + 1
       ≤ (Reg.initReg M.start w m m).post.length)
-    (hpadpre : (branchBlocks B T i).length + 1
+    (hpadpre : (branchBlocks B t i).length + 1
       ≤ (Reg.initReg M.start w m m).pre.length)
-    (hlen : (branchBlocks B T i).length ≤ T)
+    (hlen : (branchBlocks B t i).length ≤ T)
     (hpad : roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
         + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1
       ≤ 3 * (Reg.initReg M.start w m m).post.length + 1)
@@ -282,7 +282,7 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
       ⟨(seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
           (obsPhase q b ((M.stutter).haltNorm))).start,
         Tape.mk (padStr (m - 1) ++ (none :: List.replicate Z (some false)
-            ++ digitArea (i % B :: branchBlocks B T i)))
+            ++ digitArea (i % B :: branchBlocks B t i)))
           ((a :: l') ++ List.replicate (2 * (a :: l').length + 1) none
             ++ (List.replicate (padStr (m - 1)).length none ++ R))⟩).state
       = (seqComp (alignChain (padStr (m - 1)) (3 * m + 3 * l'.length + 1))
@@ -296,12 +296,12 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
         + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b + 1
       ≤ (Reg.enc (Reg.initReg M.start w m m)
           (none :: List.replicate Z (some false)
-            ++ digitArea (i % B :: branchBlocks B T i))).right.length := by
+            ++ digitArea (i % B :: branchBlocks B t i))).right.length := by
     rw [Reg.enc_right_length]; exact hpad
   have hob := (branchMachine_accept_iff_pad M.start w a l' hw hl m hm b
     (roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
       + branchBudget (Reg.initReg M.start w m m).pre.length Z T B b)
-    (none :: List.replicate Z (some false) ++ digitArea (i % B :: branchBlocks B T i))
+    (none :: List.replicate Z (some false) ++ digitArea (i % B :: branchBlocks B t i))
     R M hbK).mp hAcc
   -- 运行相位机 → 观察机命中（同一预算）
   have hhit := (obsPhase_accept_iff q b ((M.stutter).haltNorm)
@@ -310,13 +310,13 @@ theorem branchMachine_dummy_sound {q : Nat} (M : NTM q) (w : List Bool) (a : Sym
     ⟨(simObs q b ((M.stutter).haltNorm)).start,
       Reg.enc (Reg.initReg M.start w m m)
         (none :: List.replicate Z (some false)
-          ++ digitArea (i % B :: branchBlocks B T i))⟩).mp hob
+          ++ digitArea (i % B :: branchBlocks B t i))⟩).mp hob
   -- 把预算拆成 `rc_i + K`，交给任意预算可靠性
   have hrc : roundCostStay (Reg.initReg M.start w m m) Z (i % B)
       (Reg.initReg M.start w m m).cur
     ≤ roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur :=
     roundCostStay_mono _ _ _ _ _ _ (Nat.le_refl _) (Nat.le_of_lt (Nat.mod_lt i hBpos))
-  refine acceptsWithin_of_dummy_branch_acc_budget q b B T i T M w hBpos hbnd hlB Z
+  refine acceptsWithin_of_dummy_branch_acc_budget q b B t i T M w hBpos hbnd hlB Z
     (Reg.initReg M.start w m m) hxM hxw hpadpost hpadpre hlen (by omega) hk1 hk2
     rfl hxacc hxre
     (roundCostStay (Reg.initReg M.start w m m) Z B (Reg.initReg M.start w m m).cur
