@@ -749,6 +749,90 @@ theorem countGroup_run (B k : Nat) (hk : k + 1 ≤ B) (a₀ : Sym) (h₀ : a₀ 
   simp only [Nat.zero_add] at h
   exact h
 
+/-! ### 段清零：把一个 unary 组的真格全部改写成空白（右行） -/
+
+/-- **段清零机**：右行掠过真格、逐格改写为空白，遇非真格（分隔格）即原地停机。
+    进位时把溢出位清零用；清零后该组长度为 0，可再被 `extendTrue` 从空白处增长。
+    Segment clearer: walking right, overwrite each true cell with a blank and halt on the
+    first non-true cell. Used to zero an overflowing digit group before carrying. -/
+def clearTrueR : DTM 2 where
+  step := fun s a =>
+    if s.val = 0 then
+      if a = some true then ((0 : Fin 2), none, Dir.right)
+      else ((1 : Fin 2), a, Dir.stay)
+    else (s, a, Dir.stay)
+  start := 0
+  accept := 1
+  reject := 1
+
+/-- 起始态处的格局不停机。 A start-state configuration never halts. -/
+theorem clearTrueR_halted_start (L R : List Sym) :
+    clearTrueR.halted ⟨(0 : Fin 2), Tape.mk L R⟩ = false := by
+  show (((0 : Fin 2) == (⟨1, by omega⟩ : Fin 2))
+      || ((0 : Fin 2) == (⟨1, by omega⟩ : Fin 2))) = false
+  decide
+
+/-- 清零步：读真格改写为空白、右移。 Clearing step: write a blank and move right. -/
+theorem clearTrueR_step_true (L R : List Sym) :
+    clearTrueR.stepConfig ⟨(0 : Fin 2), Tape.mk L (some true :: R)⟩ =
+      ⟨(0 : Fin 2), Tape.mk (none :: L) R⟩ :=
+  stepConfig_of_lit clearTrueR (0 : Fin 2) (some true) L R (0 : Fin 2) none Dir.right
+    (Tape.mk (none :: L) R)
+    (by
+      simp only [clearTrueR]
+      rw [if_pos (show (0 : Fin 2).val = 0 from rfl)]
+      rfl)
+    (by rfl)
+
+/-- 停机步：读非真格，原地进终止态。 Halting step on a non-true cell. -/
+theorem clearTrueR_step_stop (L R : List Sym) (a : Sym) (ha : a ≠ some true) :
+    clearTrueR.stepConfig ⟨(0 : Fin 2), Tape.mk L (a :: R)⟩ =
+      ⟨(1 : Fin 2), Tape.mk L (a :: R)⟩ :=
+  stepConfig_of_lit clearTrueR (0 : Fin 2) a L R (1 : Fin 2) a Dir.stay
+    (Tape.mk L (a :: R))
+    (by
+      simp only [clearTrueR]
+      rw [if_pos (show (0 : Fin 2).val = 0 from rfl)]
+      rw [if_neg ha])
+    (by rfl)
+
+/-- 清零过程：`k` 步把整段 `k` 个真格改写成空白，头停在非真格上（状态仍为 0）。
+    Clearing walk over `k` true cells. -/
+theorem clearTrueR_erase : ∀ (k : Nat) (L : List Sym) (a : Sym), a ≠ some true →
+    ∀ (R : List Sym),
+      clearTrueR.run k
+          ⟨(0 : Fin 2), Tape.mk L (List.replicate k (some true) ++ a :: R)⟩ =
+        ⟨(0 : Fin 2), Tape.mk (List.replicate k none ++ L) (a :: R)⟩
+  | 0, L, a, _, R => by
+      show clearTrueR.run 0 ⟨(0 : Fin 2), Tape.mk L (a :: R)⟩ =
+        ⟨(0 : Fin 2), Tape.mk L (a :: R)⟩
+      rfl
+  | k + 1, L, a, ha, R => by
+      rw [show List.replicate (k + 1) (some true) ++ a :: R
+          = some true :: (List.replicate k (some true) ++ a :: R) from by
+        rw [List.replicate_succ, List.cons_append]]
+      rw [DTM.run_succ_of_not_halted _ k _
+        (clearTrueR_halted_start L (some true :: (List.replicate k (some true) ++ a :: R)))]
+      rw [clearTrueR_step_true L (List.replicate k (some true) ++ a :: R)]
+      rw [clearTrueR_erase k (none :: L) a ha R]
+      rw [replicate_succ_append]
+
+/-- **段清零**：`k + 2` 步把一段 `k + 1` 个真格全部改写成空白并停机
+    （`k + 1` 步擦除 + 1 步读到分隔格停机）。Segment clearing: `k + 1` true cells erased
+    and halted in `k + 2` steps. -/
+theorem clearTrueR_run (k : Nat) (L : List Sym) (a : Sym) (ha : a ≠ some true)
+    (R : List Sym) :
+    clearTrueR.run (k + 2)
+        ⟨(0 : Fin 2), Tape.mk L (List.replicate (k + 1) (some true) ++ a :: R)⟩ =
+      ⟨(1 : Fin 2), Tape.mk (List.replicate (k + 1) none ++ L) (a :: R)⟩ := by
+  rw [show k + 2 = (k + 1) + 1 from by omega]
+  rw [DTM.run_add clearTrueR (k + 1) 1]
+  rw [clearTrueR_erase (k + 1) L a ha R]
+  rw [run_one_stp clearTrueR
+    ⟨(0 : Fin 2), Tape.mk (List.replicate (k + 1) none ++ L) (a :: R)⟩
+    (clearTrueR_halted_start (List.replicate (k + 1) none ++ L) (a :: R))]
+  rw [clearTrueR_step_stop (List.replicate (k + 1) none ++ L) R a ha]
+
 end DTM
 
 end Pnp
