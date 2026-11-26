@@ -610,4 +610,263 @@ theorem run_accept_eq_of_padLeft_len (M : DTM q) (K : Nat) (c1 c2 : Config q)
 
 end DTM
 
+
+/-! ## 右副本绝缘：远端右尾不影响运行（右侧不触底的条件下）
+
+    与左副本绝缘镜像。E 机把输入副本挂在**区域右侧**（docs/07 #146 布局），
+    实际纸带 = 理想纸带 ++ 远端右尾；本节的工具用于把实际运行搬回理想运行。
+    注意对称差异：读数取自右侧表头，故右尾绝缘要求**每一步右侧都非空**
+    （左侧绝缘只需「左端为空时不左移」，见 #230）。
+
+    Mirror of left-tail insulation. E keeps the read-only input copy to the **right** of the
+    region (layout #146), so the actual tape is the ideal tape followed by a far-right tail.
+    Symmetry note: reads come from the head of `right`, hence every step needs a nonempty
+    right side; the obligation is stronger than its left-side counterpart. -/
+
+namespace Tape
+
+/-- 右副本绝缘：`t2` 是 `t1` 在**远端右侧**追加一段尾巴后的纸带（左侧完全相同，右侧多一段）。
+    Right-tail insulation: `t2` is `t1` with an extra far-right tail. -/
+def PadRight (t1 t2 : Tape) : Prop :=
+  t1.left = t2.left ∧ ∃ C : List Sym, t2.right = t1.right ++ C
+
+/-- 右侧非空时读数相同。读数相同需要右侧非空：空右侧读空白，而 `t2` 读到尾巴首符号。
+    With a nonempty right side the two tapes read the same symbol. -/
+theorem padRight_read {t1 t2 : Tape} (h : PadRight t1 t2) (hne : t1.right ≠ []) :
+    t1.read = t2.read := by
+  obtain ⟨_, C, hr⟩ := h
+  obtain ⟨l1, r1⟩ := t1
+  simp only at hne hr
+  cases r1 with
+  | nil => exfalso; exact hne rfl
+  | cons a as => simp [read, hr]
+
+/-- 右侧非空时同符号写入保持右副本绝缘。 A write preserves a right tail (nonempty right). -/
+theorem padRight_write {t1 t2 : Tape} (h : PadRight t1 t2) (s : Sym)
+    (hne : t1.right ≠ []) : PadRight (t1.write s) (t2.write s) := by
+  obtain ⟨hl, C, hr⟩ := h
+  refine ⟨hl, C, ?_⟩
+  cases h1 : t1.right with
+  | nil => exfalso; exact hne h1
+  | cons a as =>
+      have h2 : t2.right = a :: (as ++ C) := by rw [hr, h1, List.cons_append]
+      show s :: t2.right.tail = s :: t1.right.tail ++ C
+      rw [h2, h1]
+      simp
+
+/-- 左移保持右副本绝缘（左侧相同的部分同步变化）。 A left move preserves a right tail. -/
+theorem padRight_moveLeft {t1 t2 : Tape} (h : PadRight t1 t2) :
+    PadRight t1.moveLeft t2.moveLeft := by
+  obtain ⟨hl, C, hr⟩ := h
+  obtain ⟨l1, r1⟩ := t1
+  obtain ⟨l2, r2⟩ := t2
+  simp only at hl hr
+  subst hl
+  subst hr
+  cases l1 with
+  | nil => simp only [moveLeft]; exact ⟨rfl, C, by simp⟩
+  | cons x xs => simp only [moveLeft]; exact ⟨rfl, C, by simp⟩
+
+/-- 右侧非空时右移保持右副本绝缘。 A right move preserves a right tail (nonempty right). -/
+theorem padRight_moveRight {t1 t2 : Tape} (h : PadRight t1 t2) (hne : t1.right ≠ []) :
+    PadRight t1.moveRight t2.moveRight := by
+  obtain ⟨hl, C, hr⟩ := h
+  obtain ⟨l1, r1⟩ := t1
+  obtain ⟨l2, r2⟩ := t2
+  simp only at hl hr
+  subst hl
+  subst hr
+  cases r1 with
+  | nil => exfalso; exact hne rfl
+  | cons a as => simp only [moveRight]; exact ⟨rfl, C, by simp⟩
+
+/-- 同方向移动保持右副本绝缘（右移要求右侧非空）。
+    Moving the same way preserves a right tail (the right move needs a nonempty right). -/
+theorem padRight_move {t1 t2 : Tape} (h : PadRight t1 t2) (d : Dir) (hne : t1.right ≠ []) :
+    PadRight (t1.move d) (t2.move d) := by
+  cases d with
+  | left =>
+      show PadRight t1.moveLeft t2.moveLeft
+      exact padRight_moveLeft h
+  | right =>
+      show PadRight t1.moveRight t2.moveRight
+      exact padRight_moveRight h hne
+  | stay =>
+      show PadRight t1 t2
+      exact h
+
+end Tape
+
+namespace DTM
+
+variable {q : Nat}
+
+/-- 一步保持右副本绝缘（前提：当前右侧非空）。
+    One step preserves right-tail insulation provided the right side is nonempty. -/
+theorem step_padRight (M : DTM q) {c1 c2 : Config q}
+    (hs : c1.state = c2.state) (hP : Tape.PadRight c1.tape c2.tape)
+    (hne : c1.tape.right ≠ []) :
+    (M.stepConfig c1).state = (M.stepConfig c2).state ∧
+      Tape.PadRight (M.stepConfig c1).tape (M.stepConfig c2).tape := by
+  have hr : c1.tape.read = c2.tape.read := Tape.padRight_read hP hne
+  have hstep : M.step c1.state c1.tape.read = M.step c2.state c2.tape.read := by
+    rw [hs, hr]
+  refine ⟨?_, ?_⟩
+  · rw [stepConfig_state, stepConfig_state, hstep]
+  · unfold DTM.stepConfig
+    rw [hstep]
+    exact Tape.padRight_move (Tape.padRight_write hP _ hne) _ (by simp [Tape.write])
+
+/-- **右副本绝缘主定理**：两张纸带只差远端右尾（左侧完全相同），状态相同，且理想纸带
+    前 `k` 步的右侧始终非空 ⇒ 跑 `k` 步后状态相同。
+    Right-tail insulation: a far-right tail never changes the state trajectory, provided the
+    ideal tape keeps a nonempty right side throughout. -/
+theorem run_state_eq_of_padRight (M : DTM q) (k : Nat) :
+    ∀ (c1 c2 : Config q), c1.state = c2.state →
+      Tape.PadRight c1.tape c2.tape →
+      (∀ j, j < k → (M.run j c1).tape.right ≠ []) →
+      (M.run k c1).state = (M.run k c2).state := by
+  induction k with
+  | zero =>
+      intro c1 c2 hs _ _
+      exact hs
+  | succ K ih =>
+      intro c1 c2 hs hP hne
+      by_cases hc : M.halted c1 = true
+      · have hc2 : M.halted c2 = true := by rw [← halted_congr M hs]; exact hc
+        rw [run_of_halted M c1 hc (K + 1), run_of_halted M c2 hc2 (K + 1)]
+        exact hs
+      · have hc0 : M.halted c1 = false := by
+          cases h : M.halted c1 with
+          | false => rfl
+          | true => exact absurd h hc
+        have hc2 : M.halted c2 = false := by rw [← halted_congr M hs]; exact hc0
+        rw [run_succ_of_not_halted M K c1 hc0, run_succ_of_not_halted M K c2 hc2]
+        have hstep := step_padRight M hs hP (hne 0 (by omega))
+        have hne' : ∀ j, j < K → (M.run j (M.stepConfig c1)).tape.right ≠ [] := by
+          intro j hj
+          have h1 := hne (j + 1) (by omega)
+          rw [run_succ_of_not_halted M j c1 hc0] at h1
+          exact h1
+        exact ih (M.stepConfig c1) (M.stepConfig c2) hstep.1 hstep.2 hne'
+
+/-- **判定级推论（右副本绝缘）**：跑满 `k` 步后接受与否相同。
+    Verdict corollary for right-tail insulation. -/
+theorem run_accept_eq_of_padRight (M : DTM q) (k : Nat) (c1 c2 : Config q)
+    (hs : c1.state = c2.state) (hP : Tape.PadRight c1.tape c2.tape)
+    (hne : ∀ j, j < k → (M.run j c1).tape.right ≠ []) :
+    ((M.run k c1).state = M.accept ↔ (M.run k c2).state = M.accept) := by
+  rw [run_state_eq_of_padRight M k c1 c2 hs hP hne]
+
+end DTM
+
+namespace Tape
+
+/-- 写入不减少右侧格数（右侧非空时保持不变，空时补一格）。
+    A write never shrinks the right side. -/
+theorem rightLen_write (t : Tape) (s : Sym) (h : t.right ≠ []) :
+    (t.write s).right.length = t.right.length := by
+  obtain ⟨l, r⟩ := t
+  cases r with
+  | nil => exact absurd rfl h
+  | cons a as => rfl
+
+/-- 右移使右侧格数减一（空时保持 0）。 A right move drops one right cell. -/
+theorem rightLen_moveRight (t : Tape) : t.moveRight.right.length = t.right.length - 1 := by
+  cases t with
+  | mk l r =>
+      cases r with
+      | nil => simp [moveRight]
+      | cons a as => simp [moveRight]
+
+/-- 左移使右侧格数加一。 A left move adds one right cell. -/
+theorem rightLen_moveLeft (t : Tape) : t.moveLeft.right.length = t.right.length + 1 := by
+  cases t with
+  | mk l r =>
+      cases l with
+      | nil => simp [moveLeft]
+      | cons x xs => simp [moveLeft]
+
+end Tape
+
+namespace DTM
+
+variable {q : Nat}
+
+/-- **一步最多消耗一格右侧**：右长每步至多减一。
+    One step drops at most one right cell. -/
+theorem step_rightLen (M : DTM q) (c : Config q) :
+    (M.stepConfig c).tape.right.length ≥ c.tape.right.length - 1 := by
+  unfold DTM.stepConfig
+  generalize hst : M.step c.state c.tape.read = st
+  obtain ⟨q', s, d⟩ := st
+  have hw : (c.tape.write s).right.length ≥ c.tape.right.length - 1 := by
+    cases h : c.tape.right with
+    | nil => simp [Tape.write, h]
+    | cons a as =>
+        have hne : c.tape.right ≠ [] := by rw [h]; exact List.cons_ne_nil a as
+        have hlen : c.tape.right.length = (a :: as).length := by rw [h]
+        have hl := Tape.rightLen_write c.tape s hne
+        omega
+  cases d with
+  | left =>
+      show ((c.tape.write s).moveLeft).right.length ≥ c.tape.right.length - 1
+      rw [Tape.rightLen_moveLeft]
+      omega
+  | right =>
+      show ((c.tape.write s).moveRight).right.length ≥ c.tape.right.length - 1
+      rw [Tape.rightLen_moveRight]
+      cases h : c.tape.right with
+      | nil => simp [Tape.write, h]
+      | cons a as =>
+          have hne : c.tape.right ≠ [] := by rw [h]; exact List.cons_ne_nil a as
+          have hlen : c.tape.right.length = (a :: as).length := by rw [h]
+          have hl := Tape.rightLen_write c.tape s hne
+          omega
+  | stay =>
+      show (c.tape.write s).right.length ≥ c.tape.right.length - 1
+      exact hw
+
+/-- **右长下界累积**：跑 `k` 步后右长至少是初始右长减 `k`。
+    Right-length lower bound: `k` steps consume at most `k` right cells. -/
+theorem run_rightLen_ge (M : DTM q) (k : Nat) :
+    ∀ c : Config q, (M.run k c).tape.right.length + k ≥ c.tape.right.length := by
+  induction k with
+  | zero =>
+      intro c
+      exact Nat.le_refl _
+  | succ K ih =>
+      intro c
+      by_cases hc : M.halted c = true
+      · rw [run_of_halted M c hc]
+        omega
+      · have hc0 : M.halted c = false := by
+          cases h : M.halted c with
+          | false => rfl
+          | true => exact absurd h hc
+        rw [run_succ_of_not_halted M K c hc0]
+        have h1 := step_rightLen M c
+        have h2 := ih (M.stepConfig c)
+        omega
+
+/-- **右侧安全性的长度判据**：初始右长 ≥ `K+1` ⇒ 前 `K` 步右侧始终非空。
+    Length criterion for right safety: a long enough initial right side never empties. -/
+theorem right_safe_of_len (M : DTM q) (K : Nat) (c : Config q)
+    (h : K + 1 ≤ c.tape.right.length) :
+    ∀ j, j < K → (M.run j c).tape.right ≠ [] := by
+  intro j hj hnil
+  have hge := run_rightLen_ge M j c
+  have h0 : (M.run j c).tape.right.length = 0 := by rw [hnil]; rfl
+  omega
+
+/-- **长度版的右尾判定搬运**：初始右长 ≥ `K+1` 时，远端右尾不影响 `K` 步内的接受判定。
+    Length-based verdict transfer under a far-right tail. -/
+theorem run_accept_eq_of_padRight_len (M : DTM q) (K : Nat) (c1 c2 : Config q)
+    (hs : c1.state = c2.state) (hP : Tape.PadRight c1.tape c2.tape)
+    (h : K + 1 ≤ c1.tape.right.length) :
+    ((M.run K c1).state = M.accept ↔ (M.run K c2).state = M.accept) := by
+  rw [run_state_eq_of_padRight M K c1 c2 hs hP (right_safe_of_len M K c1 h)]
+
+end DTM
+
 end Pnp
