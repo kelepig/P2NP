@@ -256,6 +256,25 @@ end DTM
 
 namespace Tape
 
+/-- 写入不改变左侧格数。 Writing preserves the left length. -/
+theorem leftLen_write (t : Tape) (s : Sym) : (t.write s).left.length = t.left.length := rfl
+
+/-- 左移使左侧格数减一（空时保持 0）。 A left move drops one left cell. -/
+theorem leftLen_moveLeft (t : Tape) : t.moveLeft.left.length = t.left.length - 1 := by
+  cases t with
+  | mk l r =>
+      cases l with
+      | nil => simp [moveLeft]
+      | cons x xs => simp [moveLeft]
+
+/-- 右移使左侧格数加一。 A right move adds one left cell. -/
+theorem leftLen_moveRight (t : Tape) : t.moveRight.left.length = t.left.length + 1 := by
+  cases t with
+  | mk l r =>
+      cases r with
+      | nil => simp [moveRight]
+      | cons x xs => simp [moveRight]
+
 /-- `t2` 是 `t1` 在**远端左侧**追加一段尾巴后的纸带：右侧完全相同，左侧多出一段。
     `t2` is `t1` with an extra far-left tail; the head-side (right) parts agree exactly. -/
 def PadLeft (t1 t2 : Tape) : Prop :=
@@ -518,6 +537,76 @@ theorem run_state_eq_of_padLeft' (M : DTM q) (k : Nat) :
           rw [run_succ_of_not_halted M j c1 hc0] at h1
           exact h1 hnil
         exact ih (M.stepConfig c1) (M.stepConfig c2) hstep.1 hstep.2 hok'
+
+
+/-- **一步最多消耗一格左侧**：左长每步至多减一。
+    One step drops at most one left cell. -/
+theorem step_leftLen (M : DTM q) (c : Config q) :
+    (M.stepConfig c).tape.left.length ≥ c.tape.left.length - 1 := by
+  unfold DTM.stepConfig
+  generalize hst : M.step c.state c.tape.read = st
+  obtain ⟨q', s, d⟩ := st
+  cases d with
+  | left =>
+      show ((c.tape.write s).moveLeft).left.length ≥ c.tape.left.length - 1
+      rw [Tape.leftLen_moveLeft, Tape.leftLen_write]
+      omega
+  | right =>
+      show ((c.tape.write s).moveRight).left.length ≥ c.tape.left.length - 1
+      rw [Tape.leftLen_moveRight, Tape.leftLen_write]
+      omega
+  | stay =>
+      show (c.tape.write s).left.length ≥ c.tape.left.length - 1
+      rw [Tape.leftLen_write]
+      omega
+
+/-- **左长下界累积**：跑 `k` 步后左长至少是初始左长减 `k`。
+    Left-length lower bound: `k` steps consume at most `k` left cells. -/
+theorem run_leftLen_ge (M : DTM q) (k : Nat) :
+    ∀ c : Config q, (M.run k c).tape.left.length + k ≥ c.tape.left.length := by
+  induction k with
+  | zero =>
+      intro c
+      exact Nat.le_refl _
+  | succ K ih =>
+      intro c
+      by_cases hc : M.halted c = true
+      · rw [run_of_halted M c hc]
+        omega
+      · have hc0 : M.halted c = false := by
+          cases h : M.halted c with
+          | false => rfl
+          | true => exact absurd h hc
+        rw [run_succ_of_not_halted M K c hc0]
+        have h1 := step_leftLen M c
+        have h2 := ih (M.stepConfig c)
+        omega
+
+/-- 初始左长大于步数 ⇒ 运行中左侧始终非空。
+    A long enough initial left side never empties within `k` steps. -/
+theorem left_ne_of_run (M : DTM q) (k j : Nat) (hj : j ≤ k) (c : Config q)
+    (h : k + 1 ≤ c.tape.left.length) : (M.run j c).tape.left ≠ [] := by
+  intro hnil
+  have hge := run_leftLen_ge M j c
+  have h0 : (M.run j c).tape.left.length = 0 := by rw [hnil]; rfl
+  omega
+
+/-- **左界安全性的长度判据**：初始左长 ≥ `K+1` ⇒ 「左端为空还左移」不可能发生。
+    Length criterion for left safety. -/
+theorem left_safe_of_len (M : DTM q) (K : Nat) (c : Config q)
+    (h : K + 1 ≤ c.tape.left.length) :
+    ∀ j, j < K → (M.run j c).tape.left = [] →
+      (M.step (M.run j c).state (M.run j c).tape.read).2.2 ≠ Dir.left := by
+  intro j hj hnil
+  exact absurd hnil (left_ne_of_run M K j (by omega) c h)
+
+/-- **长度版的左尾判定搬运**：初始左长 ≥ `K+1` 时，远端左尾不影响 `K` 步内的接受判定。
+    Length-based verdict transfer under a far-left tail. -/
+theorem run_accept_eq_of_padLeft_len (M : DTM q) (K : Nat) (c1 c2 : Config q)
+    (hs : c1.state = c2.state) (hP : Tape.PadLeft c1.tape c2.tape)
+    (h : K + 1 ≤ c1.tape.left.length) :
+    ((M.run K c1).state = M.accept ↔ (M.run K c2).state = M.accept) := by
+  rw [run_state_eq_of_padLeft' M K c1 c2 hs hP (left_safe_of_len M K c1 h)]
 
 end DTM
 
