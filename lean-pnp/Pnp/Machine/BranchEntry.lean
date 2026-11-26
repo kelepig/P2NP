@@ -32,6 +32,7 @@ import Pnp.Machine.ObsBudget
 import Pnp.Machine.BranchPhase
 import Pnp.Machine.PassZShift
 import Pnp.Machine.BranchAccept
+import Pnp.Machine.BranchReject
 import Pnp.Machine.SimExpBound
 
 namespace Pnp
@@ -478,7 +479,7 @@ theorem costCap_T_mono (P Z T T' Bk : Nat) (h : T' ≤ T) :
   unfold costCap
   have h6 : 6 * (P + T') ≤ 6 * (P + T) := Nat.mul_le_mul_left 6 (by omega)
   have h2 : 2 * (Z + T' * (Bk + 3)) ≤ 2 * (Z + T * (Bk + 3)) :=
-    Nat.mul_le_mul_left 2 (Nat.add_le_add_left (Nat.mul_le_mul_right _ h) _)
+    Nat.mul_le_mul_left 2 (Nat.add_le_add_left (Nat.mul_le_mul_right (Bk + 3) h) _)
   omega
 
 /-- **哑元入口完备性的多项式预算版**：与 `exists_branch_dummy_hit_of_acceptsWithin` 同结论，
@@ -552,7 +553,9 @@ theorem exists_branch_dummy_hit_of_acceptsWithin_poly {q : Nat} (M : NTM q) {B :
     costCap_T_mono _ _ _ _ _ (by omega)
   have hpoly : r.steps ≤ T * costCap x.pre.length Z T (2 ^ b) := by
     rw [hbklen] at hsteps
-    exact Nat.le_trans hsteps (Nat.mul_le_mul htT hcapT)
+    have hc' : costCap x.pre.length Z t (2 ^ b) ≤ costCap x.pre.length Z T (2 ^ b) := by
+      rw [← hbklen]; exact hcapT
+    exact Nat.le_trans hsteps (Nat.mul_le_mul htT hc')
   have hmul : 2 * (i % B + 3) * t ≤ 2 * (B + 3) * (T + 1) :=
     Nat.mul_le_mul (Nat.mul_le_mul_left 2 (by omega)) (by omega)
   have hnfin : n ≤ T * costCap x.pre.length Z T (2 ^ b) + 2 * (B + 3) * (T + 1) := by
@@ -566,6 +569,103 @@ theorem exists_branch_dummy_hit_of_acceptsWithin_poly {q : Nat} (M : NTM q) {B :
       (roundCostStay x Z (i % B) x.cur
         + (T * costCap x.pre.length Z T (2 ^ b) + 2 * (B + 3) * (T + 1)))
       _ (by omega) hhit2⟩
+
+/-- **`costCap` 对零计数的平移**：零计数增加 `d`，成本上限增加 `2d`。
+    Shifting the zero count by `d` adds `2d` to the cost cap. -/
+theorem costCap_Z_shift (P Z d T Bk : Nat) :
+    costCap P (Z + d) T Bk = costCap P Z T Bk + 2 * d := by
+  unfold costCap
+  omega
+
+/-- **逐分支统一预算**：`T·costCap + 2(B+3)(T+1) + 6`，对分支 `(t,i)` 一致。
+    The uniform per-branch observer budget, independent of the branch. -/
+def branchBudget (P Z T B b : Nat) : Nat :=
+  T * costCap P Z T (2 ^ b) + 2 * (B + 3) * (T + 1) + 6
+
+/-- **单轮成本对 `z`、`k` 单调**：更大的零计数与更大的头块值只会更贵。
+    A stay round costs no less when `z` and `k` grow. -/
+theorem roundCostStay_mono {q : Nat} (x : Reg q) (z z' k k' : Nat) (s' : Sym)
+    (hz : z ≤ z') (hk : k ≤ k') :
+    roundCostStay x z k s' ≤ roundCostStay x z' k' s' := by
+  unfold roundCostStay
+  simp only [List.length_append, List.length_replicate, List.length_cons]
+  omega
+
+/-- **分支族完备性（统一预算）**：原机在 `T` 步内接受 ⇒ 存在分支 `(t, i)`，观察机从自身
+    起始态在该分支的统一预算 `roundCostStay + branchBudget` 内命中 `obsAcc`。
+    Dummy-entry completeness at the uniform per-branch budget. -/
+theorem exists_branch_dummy_hit_uniform {q : Nat} (M : NTM q) {B : Nat}
+    (hB : ∀ s a, (M.step s a).length ≤ B) (hBpos : 0 < B)
+    (w : List Bool) (T b : Nat) (hbnd : B + 2 < 2 ^ b) (hT : 0 < T)
+    (Z : Nat) (x : Reg q) (hx : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hd1 : T ≤ x.pre.length) (hd2 : T ≤ x.post.length)
+    (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (hxm : x.state = M.start)
+    (hpre : x.pre.length ≤ T + 1) (hZ : Z ≤ T + 1)
+    (hacc : M.AcceptsWithin w T) :
+    ∃ (t i : Nat), 1 ≤ t ∧ t ≤ T ∧ i < B ^ T ∧
+      ((simObs q b ((M.stutter).haltNorm)).run
+        (roundCostStay x Z (i % B) x.cur + branchBudget x.pre.length Z T B b)
+        ⟨(simObs q b ((M.stutter).haltNorm)).start,
+          x.enc (none :: List.replicate Z (some false)
+            ++ digitArea (i % B :: branchBlocks B t i))⟩).state
+        = obsAcc q b := by
+  obtain ⟨t, i, ht1, htT, hi, hhit⟩ :=
+    exists_branch_dummy_hit_of_acceptsWithin_poly M hB hBpos w T b hbnd hT Z x hx hxw
+      hd1 hd2 hxacc hxre hxm hpre hZ hacc
+  refine ⟨t, i, ht1, htT, hi, ?_⟩
+  refine simObs_run_accept_at_budget q b ((M.stutter).haltNorm) _ _ _ ?_ hhit
+  unfold branchBudget
+  omega
+
+/-- **分支族可靠性（统一预算）**：观察机从自身起始态在该分支的统一预算内命中 ⇒ 原机
+    在 `T'` 步内接受（拒绝判据的逆否；预算由 `passRun_steps_le_uniform` 覆盖所有前缀）。
+    Dummy-entry reliability at the uniform per-branch budget: a hit implies acceptance. -/
+theorem acceptsWithin_of_dummy_branch_acc_uniform (q b B T i T' : Nat) (M : NTM q) (w : List Bool)
+    (hB : 0 < B) (hb : B + 2 < 2 ^ b)
+    (hl : ∀ m a, ((M.stutter).step m a).length ≤ B + 1)
+    (Z : Nat) (x : Reg q) (hxM : x.MarkersOK) (hxw : CfgEquiv x.toConfig (M.init w))
+    (hpadpost : (branchBlocks B T i).length + 1 ≤ x.post.length)
+    (hpadpre : (branchBlocks B T i).length + 1 ≤ x.pre.length)
+    (hlen : (branchBlocks B T i).length ≤ T')
+    (hc0 : 0 < 2 ^ b) (hk1 : i % B + 1 < 2 ^ b) (hk2 : i % B + 2 < 2 ^ b)
+    (hxm : x.state = M.start) (hxacc : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (hHit : ((simObs q b ((M.stutter).haltNorm)).run
+      (roundCostStay x Z (i % B) x.cur + branchBudget x.pre.length Z T' B b)
+      ⟨(simObs q b ((M.stutter).haltNorm)).start,
+        x.enc (none :: List.replicate Z (some false)
+          ++ digitArea (i % B :: branchBlocks B T i))⟩).state
+      = obsAcc q b) :
+    M.AcceptsWithin w T' := by
+  refine Classical.byContradiction ?_
+  intro hna
+  -- 哑元前缀：把 `run (rc + K)` 拆成 `run K (run rc ·)`
+  have hd := simObs_dummy_prefix q b M x Z (i % B) hc0 hk2 hxM.1 hxm hxacc hxre
+    (branchBlocks B T i)
+  rw [DTM.run_add, hd] at hHit
+  -- 拒绝判据（统一预算）的逆否
+  refine branch_no_acc_budget_blocks q b B T i M w T' hB hb hl
+    (Z + i % B + 3) (i % B + 1) hk1
+    x x.state.val x.state.isLt rfl hxM hxw hxM.1 hxM.2 hpadpost hpadpre hlen hna
+    (branchBudget x.pre.length Z T' B b) ?_ hHit
+  intro L1 hb1 r1 hle1 hp1
+  -- 前缀通路步数：统一预算版
+  have h1 := passRun_steps_le_uniform q b ((M.stutter).haltNorm).step (Z + i % B + 3)
+    (i % B + 1) hk1 x L1 hb1 r1 hp1 T' hle1
+  -- 零计数平移：`costCap` 增加 `2*(i%B+3)`，由 `2(B+3)(T'+1)` 吸收
+  have h2 : costCap x.pre.length (Z + (i % B + 3)) T' (2 ^ b)
+      = costCap x.pre.length Z T' (2 ^ b) + 2 * (i % B + 3) := costCap_Z_shift _ _ _ _ _
+  rw [show Z + i % B + 3 = Z + (i % B + 3) from by omega, h2] at h1
+  have hmod : i % B < B := Nat.mod_lt i hB
+  have hmul : T' * (costCap x.pre.length Z T' (2 ^ b) + 2 * (i % B + 3))
+      ≤ T' * costCap x.pre.length Z T' (2 ^ b) + 2 * (B + 3) * (T' + 1) := by
+    rw [Nat.mul_add]
+    have hle : T' * (2 * (i % B + 3)) ≤ 2 * (B + 3) * (T' + 1) := by
+      rw [show T' * (2 * (i % B + 3)) = 2 * (i % B + 3) * T' from Nat.mul_comm _ _]
+      exact Nat.mul_le_mul (Nat.mul_le_mul_left 2 (by omega)) (by omega)
+    omega
+  unfold branchBudget
+  omega
 
 end DTM
 
