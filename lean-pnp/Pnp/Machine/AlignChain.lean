@@ -18,6 +18,7 @@ import Pnp.Machine.ExpandNoHalt
 import Pnp.Machine.ExpandInit
 import Pnp.Machine.WriteBack
 import Pnp.Machine.GoComp
+import Pnp.Machine.RightPad
 
 namespace Pnp
 
@@ -384,6 +385,33 @@ theorem alignChain_to_initReg {q : Nat} (st : Fin q) (w : List Bool) (a : Sym) (
           ((Reg.enc (Reg.initReg st w (T + 1) (T + 1)) L).right ++ none :: R) :=
     congrArg Config.tape hexp
   rw [htape]
+
+/-- **区域装配整机在自己的步数内不停机**（`seqComp_no_halt` 的整机版，供相位串接使用）。
+    The whole region-assembly machine never halts before its final step. -/
+theorem alignChain_halted_false (pad : List Sym) (n : Nat) (l' : List Sym)
+    (hl : ∀ v ∈ l', v ≠ none) (M R : List Sym) (k : Nat)
+    (hk : k < expandCost l' + 1 + (pad.length + 1 + (n + 1 + 1))) :
+    (alignChain pad n).halted ((alignChain pad n).run k
+      ⟨(alignChain pad n).start,
+        Tape.mk M (l' ++ List.replicate (2 * l'.length + 1) none
+          ++ (List.replicate pad.length none ++ R))⟩) = false := by
+  have hdrop : ((none :: (List.replicate pad.length none ++ R)).drop pad.length) = none :: R :=
+    drop_cons_replicate pad.length R
+  refine seqComp_no_halt expand (alignInner pad n) (expandCost l') _ _ _
+    (expand_run l' hl M _) (by simp) ?_ ?_ k hk
+  · intro j hj
+    exact expand_halted_false l' hl M _ j hj
+  · intro j hj
+    exact padAlign_halted_false pad n (codesRev l' ++ M)
+      (none :: (List.replicate pad.length none ++ R)) (by rw [hdrop]; simp) j hj
+
+/-- **装配段终点 = 理想区域编码 + 右侧远尾**：`alignChain_to_initReg` 的终态纸带只是理想
+    初始区域编码在右端多挂了一段空白尾，正是右尾绝缘（`Tape.PadRight`）的接口形态。
+    The endpoint is the ideal region encoding with a far-right tail: the `PadRight` interface. -/
+theorem enc_padRight_append {q : Nat} (x : Reg q) (L R : List Sym) :
+    Tape.PadRight (Reg.enc x L)
+      (Tape.mk (Reg.enc x L).left ((Reg.enc x L).right ++ none :: R)) :=
+  ⟨rfl, none :: R, rfl⟩
 
 end DTM
 

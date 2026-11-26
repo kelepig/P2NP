@@ -249,6 +249,105 @@ theorem seqComp_run_absorb (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q)
     DTM.run_add (seqComp A B) (na + 1) nb, hInner]
   exact seqComp_run_natAdd A B nb ⟨B.start, t'⟩
 
+/-! ### 通用不停机工具（自 `MulRound` 上移，供各机器组合复用） -/
+/-! ### Generic non-halting tools (moved up from `MulRound` for reuse). -/
+
+/-! ### 通用不停机工具 -/
+
+/-- 若运行途中的状态恒为 `s`（`s` 不是接受/拒绝态），则这段运行不停机。
+    If every intermediate state equals a non-terminal state `s`, the run never halts. -/
+theorem no_halt_of_state_eq {q : Nat} (M : DTM q) (n : Nat) (c : Config q) (s : Fin q)
+    (ha : s ≠ M.accept) (hr : s ≠ M.reject)
+    (h : ∀ k, k < n → (M.run k c).state = s) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  intro k hk
+  rw [DTM.halted, h k hk, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr ha, beq_eq_false_iff_ne.mpr hr⟩
+
+/-- 两段各自不停机 ⇒ 拼接后整段不停机。 Concatenation of two non-halting runs. -/
+theorem no_halt_add {q : Nat} (M : DTM q) (n1 n2 : Nat) (c : Config q)
+    (h1 : ∀ k, k < n1 → M.halted (M.run k c) = false)
+    (h2 : ∀ k, k < n2 → M.halted (M.run k (M.run n1 c)) = false) :
+    ∀ k, k < n1 + n2 → M.halted (M.run k c) = false := by
+  intro k hk
+  by_cases hk1 : k < n1
+  · exact h1 k hk1
+  · have hk2 : k - n1 < n2 := by omega
+    rw [show k = n1 + (k - n1) from by omega, DTM.run_add M n1 (k - n1)]
+    exact h2 (k - n1) hk2
+
+
+/-- 一步且起点不停机 ⇒ 这一步内不停机。 A one-step non-halting run. -/
+theorem no_halt_one {q : Nat} (M : DTM q) (c : Config q) (h : M.halted c = false) :
+    ∀ k, k < 1 → M.halted (M.run k c) = false := by
+  intro k hk
+  have hk0 : k = 0 := by omega
+  subst hk0
+  simpa [DTM.run] using h
+
+/-- 若一段运行 `n` 步后落在非终止态，则这段运行不停机。
+    A run ending in a non-terminal state never halts. -/
+theorem no_halt_of_run_end {q : Nat} (M : DTM q) (n : Nat) (c : Config q) (s : Fin q) (t : Tape)
+    (h : M.run n c = ⟨s, t⟩) (ha : s ≠ M.accept) (hr : s ≠ M.reject) :
+    ∀ k, k < n → M.halted (M.run k c) = false := by
+  intro k hk
+  refine halted_false_before M n c ?_ ?_ k hk
+  · rw [h]; exact ha
+  · rw [h]; exact hr
+
+
+/-! ### 组合机的不停机桥 -/
+
+/-- 组合机在左侧状态上不停机。 -/
+theorem seqComp_halted_left {q q' : Nat} (A : DTM q) (B : DTM q') (s : Fin q) (t : Tape) :
+    (seqComp A B).halted ⟨Fin.castAdd q' s, t⟩ = false := by
+  obtain ⟨h1, h2⟩ := seqComp_halt_castAdd A B s
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr (fun he => h1 he.symm),
+    beq_eq_false_iff_ne.mpr (fun he => h2 he.symm)⟩
+
+/-- 组合机在 B 段的非终止状态上不停机。 -/
+theorem seqComp_halted_right {q q' : Nat} (A : DTM q) (B : DTM q') (s : Fin q')
+    (hacc : s ≠ B.accept) (hrej : s ≠ B.reject) (t : Tape) :
+    (seqComp A B).halted ⟨Fin.natAdd q s, t⟩ = false := by
+  obtain ⟨h1, h2⟩ := seqComp_halt_natAdd A B s hacc hrej
+  rw [DTM.halted, Bool.or_eq_false_iff]
+  exact ⟨beq_eq_false_iff_ne.mpr (fun he => h1 he.symm),
+    beq_eq_false_iff_ne.mpr (fun he => h2 he.symm)⟩
+
+/-- **组合机全程不停机**：A 跑到接受态、B 跑完全程，两段各自不停机 ⇒ 组合机不停机。
+    A sequential composition never halts when both phases never halt. -/
+theorem seqComp_no_halt {q q' : Nat} (A : DTM q) (B : DTM q') (na nb : Nat) (c : Config q)
+    (t' : Tape)
+    (hA : A.run na c = ⟨A.accept, t'⟩)
+    (hne : t'.right ≠ [])
+    (hnhA : ∀ k, k < na → A.halted (A.run k c) = false)
+    (hnhB : ∀ k, k < nb → B.halted (B.run k ⟨B.start, t'⟩) = false) :
+    ∀ k, k < na + 1 + nb →
+      (seqComp A B).halted ((seqComp A B).run k ⟨Fin.castAdd q' c.state, c.tape⟩) = false := by
+  have hmid : (seqComp A B).run na ⟨Fin.castAdd q' c.state, c.tape⟩
+      = ⟨Fin.castAdd q' A.accept, t'⟩ := by
+    rw [seqComp_embed_left A B na c hnhA, hA]
+  have hsw : (seqComp A B).run 1 (⟨Fin.castAdd q' A.accept, t'⟩ : Config (q + q'))
+      = ⟨Fin.natAdd q B.start, t'⟩ := by
+    rw [seqComp_switch A B ⟨A.accept, t'⟩ rfl,
+      show ((t'.write t'.read).move Dir.stay) = t' from by
+        rw [Tape.write_read _ hne, Tape.move]]
+  rw [show na + 1 + nb = (na + 1) + nb from by omega]
+  refine no_halt_add (seqComp A B) (na + 1) nb _
+    (no_halt_add (seqComp A B) na 1 _ ?_ ?_) ?_
+  · intro k hk
+    rw [seqComp_embed_left A B k c (fun m hm => hnhA m (by omega))]
+    exact seqComp_halted_left A B _ _
+  · rw [hmid]
+    exact no_halt_one (seqComp A B) _ (seqComp_halted_left A B A.accept t')
+  · rw [DTM.run_add (seqComp A B) na 1, hmid, hsw]
+    intro k hk
+    rw [seqComp_embed_right A B k ⟨B.start, t'⟩ (fun m hm => hnhB m (by omega))]
+    obtain ⟨hacc, hrej⟩ := by
+      simpa [DTM.halted] using hnhB k hk
+    exact seqComp_halted_right A B _ hacc hrej _
+
 end DTM
 
 end Pnp
