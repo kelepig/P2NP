@@ -548,6 +548,89 @@ theorem lenRound_run (ps : List (Sym × Bool)) (k : Nat) (F : List Sym) (a : Sym
     rw [hfin]
     rfl
 
+/-- 长度计数多轮总步数（按轮递归）：`n` = 余下未计数格数、`m` = 已处理前缀格数、
+    `k` = 当前计数器值。每轮成本 `6m + 2k + 12`（即 `lenRound_run` 的步数）。
+    Total step count of `n` length-counting rounds, by recursion on the rounds. -/
+def lenRoundSteps : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | (n + 1), m, k => (6 * m + 2 * k + 12) + lenRoundSteps n (m + 1) (k + 1)
+
+/-- **长度计数 `n` 轮驱动**：已处理前缀 `ps`（标记全 `false`）、余下格 `ts`（标记全 `true`），
+    计数器 `k`、左侧前沿空白 `p ≥ |ts|`。`|ts|` 轮后全部格标记为 `false`、计数器 `k + |ts|`，
+    头回块左端；左侧前沿每轮消耗一格空白（故 `p` 每轮减一）。
+    Driving `|ts|` rounds: after the run every cell carries a `false` marker, the counter holds
+    `k + |ts|`, and each round consumes one frontier blank on the left. -/
+theorem lenRound_rounds (ps ts : List (Sym × Bool)) (k p : Nat) (R : List Sym)
+    (hps : ∀ c ∈ ps, c.2 = false) (hts : ∀ c ∈ ts, c.2 = true) (hp : ts.length ≤ p) :
+    lenRound.run (lenRoundSteps ts.length ps.length k)
+      ⟨(⟨0, by omega⟩ : Fin 11),
+        Tape.mk ((none :: List.replicate k (some true)) ++ List.replicate p none)
+          (codeCells ps ++ codeCells ts ++ R)⟩
+      = ⟨(⟨0, by omega⟩ : Fin 11),
+          Tape.mk ((none :: List.replicate (k + ts.length) (some true))
+              ++ List.replicate (p - ts.length) none)
+            (codeCells (ps ++ ts.map (fun c => (c.1, false))) ++ R)⟩ := by
+  induction ts generalizing ps k p R with
+  | nil =>
+      -- 0 轮：步数 0，纸带不变（`k+0 = k`、`p-0 = p`、`codeCells [] = []`）
+      simp only [lenRoundSteps, List.length_nil, Nat.add_zero, Nat.sub_zero, List.map_nil,
+        List.append_nil, codeCells, List.flatMap_nil]
+      rfl
+  | cons c ts ih =>
+      obtain ⟨a, m⟩ := c
+      have hm : m = true := by
+        have := hts (a, m) (by simp)
+        simpa using this
+      subst hm
+      -- 前沿空白至少有一格（供本轮消耗）
+      have hp2 : ts.length + 1 ≤ p := by
+        have := hp
+        rw [List.length_cons] at this
+        exact this
+      have hp1 : 1 ≤ p := by omega
+      -- 展开总步数：本轮成本 + 其余轮次
+      rw [show lenRoundSteps ((a, true) :: ts).length ps.length k
+          = (6 * ps.length + 2 * k + 12) + lenRoundSteps ts.length (ps.length + 1) (k + 1)
+          from by rw [List.length_cons]; rfl]
+      rw [show 6 * ps.length + 2 * k + 12
+          = 3 * ps.length + 4 + ((2 + 3 * ps.length) + 2 * k + 6) from by omega]
+      rw [DTM.run_add lenRound (3 * ps.length + 4 + ((2 + 3 * ps.length) + 2 * k + 6))
+        (lenRoundSteps ts.length (ps.length + 1) (k + 1))]
+      -- 左侧前沿剥掉一格空白，凑成本轮的输入形态
+      rw [show List.replicate p none = none :: List.replicate (p - 1) none from by
+        match p with
+        | 0 => exact absurd hp1 (by omega)
+        | _ + 1 => rfl]
+      -- 右侧块头格提及格编码
+      rw [show codeCells ps ++ codeCells ((a, true) :: ts) ++ R
+          = codeCells ps ++ cellCode (a, true) ++ (codeCells ts ++ R) from by
+        rw [codeCells_cons]
+        simp only [List.append_assoc]]
+      -- 本轮：扫描 + 翻标记 + 计数器加一 + 回块左端
+      rw [lenRound_run ps k (List.replicate (p - 1) none) a (codeCells ts ++ R) hps]
+      -- 归纳假设：剩余格、计数器 +1、前沿空白 -1、已处理前缀加一格
+      have hps' : ∀ c ∈ ps ++ [(a, false)], c.2 = false := by
+        intro c hc
+        rcases List.mem_append.mp hc with h | h
+        · exact hps c h
+        · simp only [List.mem_singleton] at h
+          rw [h]
+      have hts' : ∀ c ∈ ts, c.2 = true := fun c hc => hts c (by simp [hc])
+      have hp' : ts.length ≤ p - 1 := by omega
+      rw [show codeCells ps ++ cellCode (a, false) ++ (codeCells ts ++ R)
+          = codeCells (ps ++ [(a, false)]) ++ codeCells ts ++ R from by
+        rw [codeCells_append]
+        simp only [codeCells, List.flatMap_singleton]
+        simp only [List.append_assoc]]
+      rw [show ps.length + 1 = (ps ++ [(a, false)]).length from by simp]
+      rw [ih (ps ++ [(a, false)]) (k + 1) (p - 1) R hps' hts' hp']
+      -- 收尾对齐：计数器 / 前沿 / 前缀的数值与列表形态
+      rw [show (k + 1) + ts.length = k + ((a, true) :: ts).length from by
+        rw [List.length_cons]; omega]
+      rw [show (p - 1) - ts.length = p - ((a, true) :: ts).length from by
+        rw [List.length_cons]; omega]
+      simp only [List.map_cons, List.singleton_append, List.append_assoc]
+
 end DTM
 
 end Pnp
