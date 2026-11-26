@@ -72,13 +72,13 @@ theorem stepCs_dummy_cons {q : Nat} (tab : Fin q → Sym → List (Fin q × Sym 
 theorem simDrive_dummy_round (q b : Nat) (tab : Fin q → Sym → List (Fin q × Sym × Dir))
     (s0 : Fin q) (x : Reg q) (z k : Nat) (hc0 : 0 < 2 ^ b)
     (hK : k + 2 < 2 ^ b) (hpre : ∀ p ∈ x.pre, p.2 = false)
-    (h0 : ∀ (s : Fin q) (a : Sym), pick (tab s a) 0 = some (s, a, Dir.stay))
+    (hx0 : pick (tab x.state x.cur) 0 = some (x.state, x.cur, Dir.stay))
     (ks : List Nat) :
     (simDrive q b tab s0).run (roundCostStay x z k x.cur)
       (passStart x x.state.val 0 x.state.isLt hc0 z (k :: ks)) =
     passStart x x.state.val (k + 1) x.state.isLt (by omega) (z + k + 3) ks := by
   have hx : x.state = (⟨x.state.val, x.state.isLt⟩ : Fin q) := rfl
-  have hk := h0 x.state x.cur
+  have hk := hx0
   obtain ⟨xc, X', htail⟩ := digitArea_split ks
   have hround := simDrive_roundCanon_stay q b tab s0 x.state.val 0 x.state.isLt hc0
     x z k (k + 2) hK rfl xc X' (digitArea_head_ne_true ks xc X' htail) hpre
@@ -106,12 +106,12 @@ theorem simDrive_pass_dummy (q b : Nat) (tab : Fin q → Sym → List (Fin q × 
     (x : Reg q) (hpre : ∀ p ∈ x.pre, p.2 = false)
     (hpost : ∀ p ∈ x.post, p.2 = false)
     (hb : ∀ k' ∈ ks, k' + 2 < 2 ^ b) (hk : k + 2 < 2 ^ b)
-    (h0 : ∀ (s : Fin q) (a : Sym), pick (tab s a) 0 = some (s, a, Dir.stay))
+    (hx0 : pick (tab x.state x.cur) 0 = some (x.state, x.cur, Dir.stay))
     (r : PassRes q b) (hpass : passRun q b tab (Z + k + 3) (k + 1) (by omega) x ks hb = some r) :
     (simDrive q b tab s0).run (roundCostStay x Z k x.cur + r.steps)
       (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)) = passEnd r := by
   rw [DTM.run_add]
-  rw [simDrive_dummy_round q b tab s0 x Z k hc0 hk hpre h0 ks]
+  rw [simDrive_dummy_round q b tab s0 x Z k hc0 hk hpre hx0 ks]
   exact simDrive_pass q b tab s0 ks (Z + k + 3) (k + 1) (by omega) x x.state.val
     x.state.isLt rfl hpre hpost hb r hpass
 
@@ -176,6 +176,91 @@ theorem obsPhase_accepts_at_budget_of_passRun_accept_start (q b T : Nat) (M : NT
       ⟨(obsPhase_start_eq_embOb_obsStart q b M hc0 x Z L).symm, rfl⟩
   rw [hcfg] at h
   exact h
+
+/-- **观察机的哑元前缀**：从观察机**自身起始态**（计数器 0）出发跑一个哑元首轮，落到
+    「计数器 `k + 1`、零计数 `+k+3`」的通路起点格局（与 `simDrive_dummy_round` 一致）。
+    可观察性照 `SimBudget` 的三件套路：范围界 / 沿途非接受（哑元轮内 `m` 恒为 `x.state`）/
+    相位 14 与终点相位 0 矛盾。
+    The observer's dummy prefix: from its own start state, one dummy round lands exactly on the
+    counter-`k+1` pass start. Observability: range, non-acceptance, and phase 14 contradiction. -/
+theorem simObs_dummy_prefix (q b : Nat) (M : NTM q) (x : Reg q) (Z k : Nat)
+    (hc0 : 0 < 2 ^ b) (hK : k + 2 < 2 ^ b)
+    (hpre : ∀ p ∈ x.pre, p.2 = false)
+    (hxs : x.state = M.start) (hxne : x.state ≠ M.accept) (hxre : x.state ≠ M.reject)
+    (ks : List Nat) :
+    (simObs q b ((M.stutter).haltNorm)).run (roundCostStay x Z k x.cur)
+      ⟨(simObs q b ((M.stutter).haltNorm)).start,
+        x.enc (none :: List.replicate Z (some false) ++ digitArea (k :: ks))⟩
+      = Config.mk (embO q b (passStart x x.state.val (k + 1) x.state.isLt (by omega)
+            (Z + k + 3) ks).state)
+          (passStart x x.state.val (k + 1) x.state.isLt (by omega) (Z + k + 3) ks).tape := by
+  -- 哑元轮的起点格局（驱动层）
+  have hval : x.state.val = ((M.stutter).haltNorm).start.val := by
+    rw [hxs]
+    rfl
+  have hstart : (simObs q b ((M.stutter).haltNorm)).start
+      = embO q b (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)).state := by
+    rw [simObs_start_eq_passStart ((M.stutter).haltNorm) hc0 x Z (k :: ks)]
+    apply Fin.ext
+    simp only [embO, embS, Fin.val_mk, passStart, codeState_val, hval]
+  -- 哑元轮的转移：`pick … 0` 是空转
+  have hx0 : pick (((M.stutter).haltNorm).step x.state x.cur) 0
+      = some (x.state, x.cur, Dir.stay) :=
+    NTM.pick_haltNorm_stutter_zero M x.state x.cur (by
+      intro h
+      rcases h with h | h
+      · exact hxne h
+      · exact hxre h)
+  obtain ⟨xc, X', htail⟩ := digitArea_split ks
+  have hxc : xc ≠ some true := digitArea_head_ne_true ks xc X' htail
+  -- 可观察性
+  have hobs : ∀ i, i < roundCostStay x Z k x.cur →
+      observeState q b ((M.stutter).haltNorm)
+        ((simDrive q b ((M.stutter).haltNorm).step ((M.stutter).haltNorm).start).run i
+          (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks))).state := by
+    intro i hi
+    constructor
+    · have h0 : (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)).state.val
+          < 2 * stateCount q b := by
+        have := passStart_state_lt q b x x.state.val 0 x.state.isLt hc0 Z (k :: ks)
+        omega
+      exact simDrive_run_range q b _ _ i _ h0
+    · intro hlt
+      constructor
+      · -- 沿途非接受：哑元轮内 `m` 恒为 `x.state.val`
+        intro hacc
+        have hm := simDrive_passStart_roundM_stay q b ((M.stutter).haltNorm).step
+          ((M.stutter).haltNorm).start x x.state.val 0 x.state.isLt hc0 Z k ks xc X' htail
+          hK hxc hpre x.state x.cur rfl hx0 i (Nat.le_of_lt hi) hlt
+        rcases hm with hm | hm
+        · exact hxne (Fin.ext (by rw [← hm]; exact hacc))
+        · exact hxne (Fin.ext (by rw [← hm]; exact hacc))
+      · -- 相位 14 与终点相位 0 矛盾
+        intro h14
+        have hstuck := simDrive_run_phase14_state q b ((M.stutter).haltNorm).step
+          ((M.stutter).haltNorm).start (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks))
+          ⟨_, hlt⟩ i rfl h14 (roundCostStay x Z k x.cur - i)
+        rw [show i + (roundCostStay x Z k x.cur - i) = roundCostStay x Z k x.cur from
+            Nat.add_sub_cancel' (Nat.le_of_lt hi),
+          simDrive_dummy_round q b ((M.stutter).haltNorm).step ((M.stutter).haltNorm).start
+            x Z k hc0 hK hpre hx0 ks] at hstuck
+        have hp0 : unpackPh (2 ^ b) 9 15
+            (passStart x x.state.val (k + 1) x.state.isLt (by omega) (Z + k + 3) ks).state.val
+            = 0 := by
+          simp only [passStart, Config.state, embS, Fin.val_mk]
+          rw [codeState_unpackPh q b x.state.val (k + 1) 0 0 x.state.isLt (by omega)
+            (by decide) (by decide)]
+        rw [hstuck] at hp0
+        simp only [embS, Fin.val_mk] at hp0
+        rw [h14] at hp0
+        omega
+  -- 观察投影：`d` 步后正是通路起点格局
+  have hdele := simObs_run_delegate q b ((M.stutter).haltNorm)
+    (roundCostStay x Z k x.cur)
+    (passStart x x.state.val 0 x.state.isLt hc0 Z (k :: ks)) hobs
+  rw [hstart, hdele]
+  exact simDrive_dummy_round q b ((M.stutter).haltNorm).step
+    ((M.stutter).haltNorm).start x Z k hc0 hK hpre hx0 ks
 
 end DTM
 
