@@ -207,10 +207,15 @@ theorem markAlign_run (n : Nat) (t : Tape) (hr : t.right ≠ []) :
   have hne : (moveLeftN n t).right ≠ [] := moveLeftN_right_ne_of_pos n t hr
   -- 右带拆成「头符号 + 余下」
   obtain ⟨L, a, R, ht⟩ : ∃ L a R, moveLeftN n t = Tape.mk L (a :: R) := by
-    obtain ⟨L, R⟩ := moveLeftN n t
+    obtain ⟨Lm, R, ht0⟩ : ∃ Lm R, moveLeftN n t = Tape.mk Lm R := ⟨_, _, rfl⟩
+    have hRne : R ≠ [] := by
+      intro hnil
+      have h := hne
+      rw [ht0, hnil] at h
+      exact h rfl
     cases R with
-    | nil => exfalso; exact hne rfl
-    | cons a as => exact ⟨L, a, as, rfl⟩
+    | nil => exact absurd rfl hRne
+    | cons a as => exact ⟨Lm, a, as, ht0⟩
   -- 左段不停机
   have hnhA : ∀ i, i < n → (goLeft n).halted ((goLeft n).run i ⟨(goLeft n).start, t⟩) = false := by
     intro i hi
@@ -229,10 +234,7 @@ theorem markAlign_run (n : Nat) (t : Tape) (hr : t.right ≠ []) :
     (goLeft_run n t hr) hne ?_ hnhA hnhB
   -- `markHead` 在主纸带上的运行
   rw [ht]
-  have := markHead_run L a R
-  rw [show (moveLeftN n t).write (some true) = Tape.mk L (some true :: R) from by
-    rw [ht]; rfl]
-  exact this
+  exact markHead_run L a R
 
 /-- `markAlign` 的结果与「分段左移」写法一致：`moveLeftN (a + (b + 1))` 即
     「左移 `a`、再左移 `b`、再左移 1」，与 `ExpandInit` 的纸带级链直接对接。
