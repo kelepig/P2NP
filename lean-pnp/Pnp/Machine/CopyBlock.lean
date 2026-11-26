@@ -1260,6 +1260,38 @@ theorem copyCells_roundLast (a : Sym) (q : List (Sym × Bool)) (hq : ∀ p ∈ q
       List.singleton_append, List.append_assoc]]
   rfl
 
+
+/-- 整块转写的预算成本：`m` = 当前区域格数，`r` = 剩余源格数（含当前格）。
+    闭式 `6·m·r + 6r² + 9r − 2`；单轮递推为 `6m+15 + copyCost (m+2) r`。
+    Budgeted block cost: `m` region cells, `r` remaining source cells. -/
+def copyCost (m r : Nat) : Nat := 6 * (m * r) + 6 * (r * r) + 9 * r - 2
+
+/-- 末轮（`r = 1`）成本：`6m + 13`。 -/
+theorem copyCost_last (m : Nat) : copyCost m 1 = 6 * m + 13 := by
+  unfold copyCost
+  simp only [Nat.mul_one, Nat.one_mul]
+  omega
+
+/-- 单轮递推：区域长大两格、剩余源格少一，成本减 `6m+15`。
+    One round of the block recursion. -/
+theorem copyCost_step (m r : Nat) (hr : 1 ≤ r) :
+    copyCost m (r + 1) = 6 * m + 15 + copyCost (m + 2) r := by
+  unfold copyCost
+  simp only [Nat.mul_succ, Nat.succ_mul, Nat.mul_add, Nat.add_assoc]
+  omega
+
+
+
+/-- 中间轮的区域逆序衔接：`reverse(codeCells (q ++ [c])) ++ [f, cS, cF] = reverse(codeCells ([c] ++ q ++ [c]))`。
+    Bridging the mid-round region form to the paired-growth form. -/
+theorem codeCells_mid_rev (a : Sym) (q : List (Sym × Bool)) :
+    (codeCells (q ++ [(a, false)])).reverse ++ [some false, codeSnd a, codeFst a]
+      = (codeCells ([(a, false)] ++ q ++ [(a, false)])).reverse := by
+  rw [codeCells_double]
+  rw [codeCells_append, codeCells_pair_false, List.reverse_append]
+  simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append,
+    List.singleton_append, List.append_assoc]
+
 end DTM
 
 end Pnp
