@@ -32,6 +32,7 @@
 
 import Pnp.Machine.LenRound
 import Pnp.Machine.DblOnce
+import Pnp.Machine.DblRounds
 
 namespace Pnp
 
@@ -323,6 +324,122 @@ theorem nstep_exhaust_pos (c m : Nat) (F R : List Sym) :
     (by rfl) _ _ (by omega)]
   etapeP
 
-end DTM
+/-! ## 相位 1+2 的「到达前一刻」前缀（#223）
 
-end Pnp
+   `nstep_return` 的最后一步只是「读到值块首格、原地转 5」，纸带不变。
+   把最后一步剥掉就得到停在状态 1、头已在值块首格的前缀版本——`powCtl` 的交接点。
+   The prefix ending one step before `nstep`'s arrival (state 1, head on the value block's
+   first cell); `powCtl` hands off from exactly here. -/
+
+/-- **右行回程（到达前一刻）**：与 `nstep_return` 同一段路，但停在状态 1（最后一步未走）。
+    The return walk one step before arrival (still in state 1). -/
+theorem nstep_return_pre (c : Nat) (T R0' : List Sym) :
+    nstep.run (c + 2)
+      ⟨(⟨1, by omega⟩ : Fin 6),
+        Tape.mk T (some false :: (List.replicate c (some false)
+          ++ (none :: (some true :: R0'))))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate c (some false) ++ (some false :: T)))
+            (some true :: R0')⟩ := by
+  induction c generalizing T with
+  | zero =>
+      rw [show (0 : Nat) + 2 = 1 + 1 from rfl, DTM.run_add nstep 1 1]
+      rw [estepNP 1 (by omega) (some false) (⟨1, by omega⟩ : Fin 6) (some false) Dir.right
+        (by rfl) _ _ (by omega)]
+      etapeP
+      rw [estepNP 1 (by omega) none (⟨1, by omega⟩ : Fin 6) none Dir.right
+        (by rfl) _ _ (by omega)]
+      etapeP
+  | succ c ih =>
+      rw [show c + 1 + 2 = 1 + (c + 2) from by omega, DTM.run_add nstep 1 (c + 2)]
+      rw [estepNP 1 (by omega) (some false) (⟨1, by omega⟩ : Fin 6) (some false) Dir.right
+        (by rfl) _ _ (by omega)]
+      etapeP
+      rw [ih (some false :: T)]
+      rw [rep_cons_shift c (some false) (some false :: T)]
+
+/-- **右行回程（到达前一刻，无已消费格）**：`nstep_return_pre` 在 `c = 0` 的展开形（2 步）。
+    The `c = 0` instance of `nstep_return_pre` (two steps). -/
+theorem nstep_return_pre_zero (T R0' : List Sym) :
+    nstep.run 2
+      ⟨(⟨1, by omega⟩ : Fin 6), Tape.mk T (some false :: (none :: (some true :: R0')))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6), Tape.mk (none :: (some false :: T)) (some true :: R0')⟩ := by
+  simpa only [Nat.zero_add, List.replicate_zero, List.nil_append] using nstep_return_pre 0 T R0'
+
+/-- **消费一个 n 单位的前缀（尚无已消费格）**：5 步后头在值块首格、状态 1（最后一步未走）。
+    The consume prefix when nothing has been consumed yet (five steps). -/
+theorem nstep_consume_pre_zero (r m : Nat) (F R : List Sym) :
+    nstep.run 5
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some true :: (List.replicate r (some true) ++ none :: F)))
+          (some true :: (List.replicate m (some true) ++ (none :: R)))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6),
+          Tape.mk (none :: (some false :: (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: R)))⟩ := by
+  rw [show 5 = 2 + (1 + 2) from by omega, DTM.run_add nstep 2 (1 + 2)]
+  rw [nstep_cross (some true) (some true)
+    (List.replicate r (some true) ++ none :: F)
+    (List.replicate m (some true) ++ (none :: R))]
+  rw [DTM.run_add nstep 1 2]
+  rw [nstep_flip (List.replicate r (some true) ++ none :: F)
+    (none :: (some true :: (List.replicate m (some true) ++ (none :: R))))]
+  rw [nstep_return_pre_zero (List.replicate r (some true) ++ none :: F)
+    (List.replicate m (some true) ++ (none :: R))]
+
+/-- **消费一个 n 单位的前缀（已有已消费格）**：`2c + 7` 步后头在值块首格、状态 1。
+    The consume prefix below `c + 1` already-consumed cells (`2c + 7` steps, state 1). -/
+theorem nstep_consume_pre_pos (c r m : Nat) (F R : List Sym) :
+    nstep.run (2 * c + 7)
+      ⟨(⟨0, by omega⟩ : Fin 6),
+        Tape.mk (none :: (some false :: (List.replicate c (some false)
+            ++ (some true :: (List.replicate r (some true) ++ none :: F)))))
+          (some true :: (List.replicate m (some true) ++ (none :: R)))⟩
+      = ⟨(⟨1, by omega⟩ : Fin 6),
+          Tape.mk (none :: (List.replicate (c + 2) (some false)
+              ++ (List.replicate r (some true) ++ none :: F)))
+            (some true :: (List.replicate m (some true) ++ (none :: R)))⟩ := by
+  rw [show 2 * c + 7 = 2 + ((c + 1) + (1 + (c + 3))) from by omega]
+  rw [DTM.run_add nstep 2 ((c + 1) + (1 + (c + 3)))]
+  rw [nstep_cross (some false) (some true)
+    (List.replicate c (some false) ++ (some true :: (List.replicate r (some true) ++ none :: F)))
+    (List.replicate m (some true) ++ (none :: R))]
+  rw [DTM.run_add nstep (c + 1) (1 + (c + 3))]
+  rw [nstep_walk_false c r F
+    (none :: (some true :: (List.replicate m (some true) ++ (none :: R))))]
+  rw [DTM.run_add nstep 1 (c + 3)]
+  rw [nstep_flip (List.replicate r (some true) ++ none :: F)
+    (List.replicate (c + 1) (some false)
+      ++ (none :: (some true :: (List.replicate m (some true) ++ (none :: R)))))]
+  rw [nstep_return_pre (c + 1) (List.replicate r (some true) ++ none :: F)
+    (List.replicate m (some true) ++ (none :: R))]
+  rw [rep_cons_shift (c + 1) (some false) (List.replicate r (some true) ++ none :: F)]
+  etapeP
+
+/-- **状态 5 是「陷阱」**：一旦 `nstep` 进入状态 5，之后任意步数状态都是 5。
+    State 5 is absorbing: once entered, the state stays 5 for any number of steps. -/
+theorem nstep_run_state_five (k : Nat) :
+    ∀ (c : Config 6), c.state = (⟨5, by omega⟩ : Fin 6) →
+      (nstep.run k c).state = (⟨5, by omega⟩ : Fin 6) := by
+  induction k with
+  | zero => intro c h; exact h
+  | succ k ih =>
+      intro c h
+      have hstep : (nstep.stepConfig c).state = (⟨5, by omega⟩ : Fin 6) := by
+        rw [DTM.stepConfig_state, h]
+        rfl
+      rw [DTM.run]
+      by_cases hh : nstep.halted c
+      · simp only [hh, ite_true]
+        exact h
+      · simp only [hh, Bool.false_eq_true, ite_false]
+        exact ih (nstep.stepConfig c) hstep
+
+/-- **前缀内不可能提前到达**：若 `m` 步时已在状态 5，则 `n` 步（`n ≥ m`）时仍是 5。
+    于是「终态是 1」就排除了前 `n` 步内经过状态 5。
+    Reaching state 5 early makes the endpoint 5; an endpoint of 1 therefore excludes it. -/
+theorem nstep_state_five_stable {m n : Nat} (hmn : m ≤ n) (c : Config 6)
+    (h5 : (nstep.run m c).state = (⟨5, by omega⟩ : Fin 6)) :
+    (nstep.run n c).state = (⟨5, by omega⟩ : Fin 6) := by
+  rw [← Nat.add_sub_of_le hmn, DTM.run_add nstep m (n - m) c]
+  exact nstep_run_state_five (n - m) (nstep.run m c) h5
+

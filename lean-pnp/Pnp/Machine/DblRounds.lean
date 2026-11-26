@@ -47,6 +47,15 @@ def dblRoundsSteps : Nat → Nat → Nat
   | 0, _ => 0
   | R + 1, m => dblRoundsSteps R m + (dblOnceSteps (m * 2 ^ R) + 1)
 
+/-- `dblRounds R` 的起点状态编号为 0。 The start state index of `dblRounds R` is `0`. -/
+theorem dblRounds_start_val (R : Nat) : (dblRounds R).start.val = 0 := by
+  induction R with
+  | zero => rfl
+  | succ R ih =>
+      show (Fin.castAdd 7 (dblRounds R).start).val = 0
+      rw [Fin.val_castAdd]
+      exact ih
+
 /-- `dblRounds R` 的接受态编号为 `7 R`。 The accept state index of `dblRounds R` is `7 R`. -/
 theorem dblRounds_accept_val (R : Nat) : (dblRounds R).accept.val = 7 * R := by
   induction R with
